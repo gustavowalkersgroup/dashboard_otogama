@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+/*
+ * Tokens do dashboard (paleta de referência validada, modo claro fixo —
+ * dark mode não é requisito do v1, então o visual é deliberadamente claro).
+ */
+@theme {
+  --color-plano: #f9f9f7;        /* fundo da página */
+  --color-superficie: #fcfcfb;   /* cards e superfícies de gráfico */
+  --color-tinta: #0b0b0b;        /* texto primário */
+  --color-tinta-2: #52514e;      /* texto secundário */
+  --color-tinta-3: #898781;      /* texto mudo / eixos */
+  --color-grade: #e1e0d9;        /* hairlines e gridlines */
+  --color-serie-1: #2a78d6;      /* envios */
+  --color-serie-2: #eb6834;      /* confirmações */
+  --color-bom: #0ca30c;          /* status: bom */
+  --color-critico: #d03b3b;      /* status: crítico */
+  --color-alerta: #fab219;       /* status: atenção */
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  background: var(--color-plano);
+  color: var(--color-tinta);
+}
