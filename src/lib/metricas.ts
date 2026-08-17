@@ -9,15 +9,18 @@ export function periodoValido(p: string | undefined): Periodo {
   return (PERIODOS as readonly number[]).includes(n) ? (n as Periodo) : 30;
 }
 
+// alias evita o inline de `process.env.X` do bundler (mesma causa do bug em db.ts)
+const env: Record<string, string | undefined> = process.env;
+
 // Constantes da métrica "trabalho poupado" (minutos por evento) — editáveis via env.
 export const MINUTOS = {
-  lembrete: Number(process.env.MINUTOS_POR_LEMBRETE ?? 3),
-  confirmacao: Number(process.env.MINUTOS_POR_CONFIRMACAO ?? 2),
-  agendamentoIa: Number(process.env.MINUTOS_POR_AGENDAMENTO_IA ?? 8),
+  lembrete: Number(env.MINUTOS_POR_LEMBRETE ?? 3),
+  confirmacao: Number(env.MINUTOS_POR_CONFIRMACAO ?? 2),
+  agendamentoIa: Number(env.MINUTOS_POR_AGENDAMENTO_IA ?? 8),
 };
 
 // Horas após o envio para um agendamento sem resposta contar como "pendente".
-export const PENDENTE_APOS_HORAS = Number(process.env.PENDENTE_APOS_HORAS ?? 4);
+export const PENDENTE_APOS_HORAS = Number(env.PENDENTE_APOS_HORAS ?? 4);
 
 const n = (v: unknown): number => Number(v ?? 0);
 

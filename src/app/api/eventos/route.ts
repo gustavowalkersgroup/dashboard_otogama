@@ -16,7 +16,8 @@ const TIPOS = new Set([
 
 // Rate limit em memória (por instância): suficiente contra loop acidental de
 // workflow — um crashloop martela a mesma instância quente.
-const LIMITE_POR_MINUTO = Number(process.env.RATE_LIMIT_POR_MINUTO ?? 60);
+const env: Record<string, string | undefined> = process.env;
+const LIMITE_POR_MINUTO = Number(env.RATE_LIMIT_POR_MINUTO ?? 60);
 let janelaAtual = 0;
 let contagemJanela = 0;
 
@@ -31,7 +32,8 @@ function estourouRateLimit(): boolean {
 }
 
 function chaveValida(recebida: string | null): boolean {
-  const esperada = process.env.INGEST_API_KEY;
+  const env: Record<string, string | undefined> = process.env;
+  const esperada = env.INGEST_API_KEY;
   if (!esperada || !recebida) return false;
   const a = createHash("sha256").update(recebida).digest();
   const b = createHash("sha256").update(esperada).digest();

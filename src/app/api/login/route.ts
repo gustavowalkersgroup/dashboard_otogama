@@ -6,7 +6,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function senhaCorreta(recebida: string): boolean {
-  const esperada = process.env.DASHBOARD_PASSWORD;
+  const env: Record<string, string | undefined> = process.env;
+  const esperada = env.DASHBOARD_PASSWORD;
   if (!esperada) return false;
   const a = createHash("sha256").update(recebida).digest();
   const b = createHash("sha256").update(esperada).digest();

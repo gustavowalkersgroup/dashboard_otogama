@@ -4,7 +4,9 @@ export const COOKIE_SESSAO = "otogama_sessao";
 const DURACAO_DIAS = 30;
 
 function segredo(): Uint8Array {
-  const s = process.env.SESSION_SECRET;
+  // alias evita o inline de `process.env.X` do bundler (mesma causa do bug em db.ts)
+  const env: Record<string, string | undefined> = process.env;
+  const s = env.SESSION_SECRET;
   if (!s || s.length < 16) {
     throw new Error("SESSION_SECRET ausente ou curta demais (mínimo 16 caracteres).");
   }
