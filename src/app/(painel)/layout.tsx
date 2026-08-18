@@ -25,6 +25,12 @@ export default function LayoutPainel({ children }: { children: React.ReactNode }
       <footer className="mx-auto max-w-6xl px-4 pb-8 pt-4 text-xs text-tinta-3">
         por <span className="font-medium text-tinta-2">NexTags</span> · dados em horário de
         Brasília
+        {process.env.VERCEL_GIT_COMMIT_SHA && (
+          <span title={process.env.VERCEL_GIT_COMMIT_SHA}>
+            {" "}
+            · build {process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)}
+          </span>
+        )}
       </footer>
     </div>
   );
