@@ -1,9 +1,15 @@
 import CardMetrica from "@/components/CardMetrica";
 import ErroDados from "@/components/ErroDados";
 import FiltroPeriodo from "@/components/FiltroPeriodo";
+import GraficoComparecimentoIa from "@/components/GraficoComparecimentoIa";
 import TabelaAgendamentos from "@/components/TabelaAgendamentos";
 import { numeroBR } from "@/lib/formato";
-import { listaAgendamentosIa, periodoValido, resumoAgendamentosIa } from "@/lib/metricas";
+import {
+  comparecimentoIaVsHumano,
+  listaAgendamentosIa,
+  periodoValido,
+  resumoAgendamentosIa,
+} from "@/lib/metricas";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +20,12 @@ export default async function Agendamentos({
 }) {
   const dias = periodoValido((await searchParams).p);
 
-  let agendamentos;
+  let agendamentos, comparecimento;
   try {
-    agendamentos = await listaAgendamentosIa(dias);
+    [agendamentos, comparecimento] = await Promise.all([
+      listaAgendamentosIa(dias),
+      comparecimentoIaVsHumano(dias),
+    ]);
   } catch (e) {
     console.error("agendamentos:", e);
     return (
@@ -48,6 +57,10 @@ export default async function Agendamentos({
         <CardMetrica rotulo="Agendados" valor={numeroBR(q("Agendado"))} detalhe="aprovados pela recepção" />
         <CardMetrica rotulo="Em análise" valor={numeroBR(q("Em Análise"))} detalhe="aguardando a recepção" />
         <CardMetrica rotulo="Recusados" valor={numeroBR(q("Recusado"))} />
+      </div>
+
+      <div className="mt-4">
+        <GraficoComparecimentoIa grupos={comparecimento} />
       </div>
 
       <div className="mt-4">

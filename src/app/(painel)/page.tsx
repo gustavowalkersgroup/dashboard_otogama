@@ -3,10 +3,12 @@ import CardMetrica from "@/components/CardMetrica";
 import ErroDados from "@/components/ErroDados";
 import FiltroPeriodo from "@/components/FiltroPeriodo";
 import GraficoDiario from "@/components/GraficoDiario";
+import GraficoFunilComparecimento from "@/components/GraficoFunilComparecimento";
 import { duracaoHumana, numeroBR } from "@/lib/formato";
 import {
   contagemConfirmacoes,
   contagemLembretes,
+  funilComparecimento,
   listaAgendamentosIa,
   periodoValido,
   resumoAgendamentosIa,
@@ -28,7 +30,7 @@ export default async function VisaoGeral({
 
   let dados;
   try {
-    const [lembretes, confirmacoes, taxa, tempo, agendamentos, serie, saude] = await Promise.all([
+    const [lembretes, confirmacoes, taxa, tempo, agendamentos, serie, saude, funil] = await Promise.all([
       contagemLembretes(dias),
       contagemConfirmacoes(dias),
       taxaConfirmacao(dias),
@@ -36,8 +38,9 @@ export default async function VisaoGeral({
       listaAgendamentosIa(dias),
       serieDiaria(dias),
       saudeApi(dias),
+      funilComparecimento(dias),
     ]);
-    dados = { lembretes, confirmacoes, taxa, tempo, agendamentos, serie, saude };
+    dados = { lembretes, confirmacoes, taxa, tempo, agendamentos, serie, saude, funil };
   } catch (e) {
     console.error("visão geral:", e);
     return (
@@ -50,7 +53,7 @@ export default async function VisaoGeral({
     );
   }
 
-  const { lembretes, confirmacoes, taxa, tempo, agendamentos, serie, saude } = dados;
+  const { lembretes, confirmacoes, taxa, tempo, agendamentos, serie, saude, funil } = dados;
   const ia = resumoAgendamentosIa(agendamentos);
   const poupado = trabalhoPoupado({
     mensagensLembrete: lembretes.mensagens,
@@ -109,6 +112,10 @@ export default async function VisaoGeral({
           detalhe={`≈ ${poupado.diasUteis.toFixed(1).replace(".", ",")} dias úteis de um funcionário`}
           className="col-span-2 lg:col-span-1"
         />
+      </div>
+
+      <div className="mt-4">
+        <GraficoFunilComparecimento estagios={funil} />
       </div>
 
       <div className="mt-4">

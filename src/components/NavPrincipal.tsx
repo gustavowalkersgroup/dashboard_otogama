@@ -7,6 +7,7 @@ const ITENS = [
   { href: "/", rotulo: "Visão geral" },
   { href: "/confirmacoes", rotulo: "Confirmações" },
   { href: "/agendamentos", rotulo: "Agendamentos IA" },
+  { href: "/agenda", rotulo: "Agenda" },
   { href: "/saude", rotulo: "Saúde da API" },
 ];
 

@@ -86,6 +86,7 @@ Quem alimenta o dashboard (fora deste repo — veja `INTEGRACAO.md`):
 | n8n · workflows de lembrete D-0 / D-1 / consulta perdida | `envio_lembrete` |
 | n8n · webhook de confirmação | `confirmacao` |
 | n8n · sync Konsist (poll de pré-agendamentos) | `agendamento_ia`, `desfecho_agendamento` |
+| n8n · poll horário na Konsist (agenda/desfecho de consultas) | `status_consulta` |
 | n8n · monitor de uptime da API | `api_status` |
 | NexTags · External Request no botão "preciso de ajuda" | `precisa_ajuda` |
 
@@ -126,6 +127,10 @@ Todos POSTam em `/api/eventos` com o header `x-api-key`. Os nodes de log devem r
 | Tempo até confirmar | mediana (e média) de `confirmação − envio anterior mais recente`, descartando deltas negativos ou > 72h |
 | Trabalho poupado | lembrete enviado = 3 min · confirmação processada = 2 min · agendamento da IA = 8 min (editáveis via env); exibido em horas e em dias úteis de 8h |
 | Saúde da API | pares fora→ok de `api_status`; uptime % recortado ao período |
+| Taxa de falta (tela Agenda) | desfecho mais recente por chave em `status_consulta`; `Faltou ÷ (Faltou + Realizado)` — `Cancelado` nunca entra no denominador |
+| Comparecimento com × sem lembrete (Visão geral) | mesmo desfecho, separado por existência de `envio_lembrete` para a chave; funil Agendado → Confirmado → Compareceu |
+| Desfecho por médico (tela Agenda) | desfecho mais recente por chave, agrupado por `payload.medico`, top 12 por volume |
+| Comparecimento IA × manual (tela Agendamentos IA) | mesmo desfecho, separado por existência de `agendamento_ia` para a chave |
 
 ## Scripts
 

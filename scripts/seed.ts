@@ -35,6 +35,14 @@ const entre = (min: number, max: number) => min + rnd() * (max - min);
 const inteiro = (min: number, max: number) => Math.floor(entre(min, max + 1));
 const escolha = <T>(arr: T[]): T => arr[Math.floor(rnd() * arr.length)];
 
+/** Desfecho terminal de uma consulta, dadas as chances de Realizado/Faltou (resto = Cancelado). */
+function situacaoTerminal(pRealizado: number, pFaltou: number): "Realizado" | "Faltou" | "Cancelado" {
+  const r = rnd();
+  if (r < pRealizado) return "Realizado";
+  if (r < pRealizado + pFaltou) return "Faltou";
+  return "Cancelado";
+}
+
 const NOMES = [
   "Maria Silva", "José Santos", "Ana Oliveira", "João Souza", "Francisca Lima",
   "Antônio Pereira", "Adriana Costa", "Carlos Rodrigues", "Juliana Almeida",
@@ -104,6 +112,18 @@ for (let off = DIAS; off >= 0; off--) {
       data_consulta: dataConsulta,
       hora: horaConsulta,
     };
+    const servicoConsulta =
+      payloadBase.tipo_consulta === "exame" ? escolha(SERVICOS.slice(1)) : SERVICOS[0];
+    const situacaoPayload = (situacao: string) => ({
+      situacao,
+      medico,
+      especialidade: "Otorrinolaringologia",
+      servico: servicoConsulta,
+      data_consulta: dataConsulta,
+      hora_consulta: horaConsulta,
+    });
+    const [horaC, minutoC] = horaConsulta.split(":").map(Number);
+    const tsConsulta = brt(off, horaC, minutoC);
 
     const tsD1 = brt(off + 1, 18, inteiro(0, 45));
     const tsD0 = brt(off, 7, inteiro(20, 55));
@@ -117,6 +137,19 @@ for (let off = DIAS; off >= 0; off--) {
           paciente,
           payload: { origem, ...payloadBase },
           ts,
+        });
+      }
+    }
+    // poll horário na Konsist vê a consulta como "Agendado" desde o lembrete da véspera
+    if (tsD1 <= agora) {
+      for (const chave of chaves) {
+        eventos.push({
+          tipo: "status_consulta",
+          chave,
+          telefone,
+          paciente,
+          payload: situacaoPayload("Agendado"),
+          ts: tsD1,
         });
       }
     }
@@ -137,6 +170,20 @@ for (let off = DIAS; off >= 0; off--) {
             payload: { resultado },
             ts: tsConf,
           });
+        }
+        // a Konsist reflete a confirmação pouco depois, no poll seguinte
+        const tsConfirmado = new Date(tsConf.getTime() + entre(5, 30) * 60_000);
+        if (tsConfirmado <= agora) {
+          for (const chave of chaves) {
+            eventos.push({
+              tipo: "status_consulta",
+              chave,
+              telefone,
+              paciente,
+              payload: situacaoPayload("Confirmado"),
+              ts: tsConfirmado,
+            });
+          }
         }
       }
     } else if (sorte < 0.76) {
@@ -167,6 +214,34 @@ for (let off = DIAS; off >= 0; off--) {
       }
     }
     // o restante simplesmente não responde (aparece em "sem resposta")
+
+    // ---- desfecho real da consulta (poll horário na Konsist), só depois do horário marcado
+    if (tsConsulta <= agora) {
+      const situacao =
+        sorte < 0.72
+          ? situacaoTerminal(0.9, 0.07) // confirmou
+          : sorte < 0.76
+            ? situacaoTerminal(0.45, 0.45) // pediu ajuda em vez de confirmar
+            : sorte < 0.78
+              ? situacaoTerminal(0.7, 0.2) // confirmou mas sem_paciente na Konsist
+              : situacaoTerminal(0.3, 0.6); // nunca respondeu — é aqui que o no-show pesa mais
+      const tsTerminal =
+        situacao === "Cancelado"
+          ? new Date(tsConsulta.getTime() - entre(2, 72) * 3_600_000)
+          : new Date(tsConsulta.getTime() + entre(10, 90) * 60_000);
+      if (tsTerminal <= agora) {
+        for (const chave of chaves) {
+          eventos.push({
+            tipo: "status_consulta",
+            chave,
+            telefone,
+            paciente,
+            payload: situacaoPayload(situacao),
+            ts: tsTerminal,
+          });
+        }
+      }
+    }
   }
 
   // ---- agendamentos criados pela IA (origem=1, Em Análise → Agendado/Recusado)
@@ -177,6 +252,8 @@ for (let off = DIAS; off >= 0; off--) {
       const telefone = telefoneFake();
       const chave = String(proximaChave++);
       const protocolo = `P${inteiro(100000, 999999)}`;
+      const medicoIa = escolha(MEDICOS);
+      const servicoIa = escolha(SERVICOS);
       const tsIa = brt(off, inteiro(8, 19), inteiro(0, 59));
       if (tsIa > agora) continue;
       eventos.push({
@@ -186,9 +263,9 @@ for (let off = DIAS; off >= 0; off--) {
         paciente,
         payload: {
           protocolo,
-          medico: escolha(MEDICOS),
+          medico: medicoIa,
           especialidade: "Otorrinolaringologia",
-          servico: escolha(SERVICOS),
+          servico: servicoIa,
           idstatus: 1,
           status: "Em Análise",
         },
@@ -210,6 +287,52 @@ for (let off = DIAS; off >= 0; off--) {
             },
             ts: tsDesfecho,
           });
+
+          // aprovado pela recepção: a consulta em si acontece alguns dias depois
+          if (!recusado) {
+            const tsConsultaIa = new Date(tsDesfecho.getTime() + entre(1, 5) * 24 * 3_600_000);
+            const dataConsultaIa = new Intl.DateTimeFormat("pt-BR", {
+              timeZone: "America/Sao_Paulo",
+            }).format(tsConsultaIa);
+            const horaConsultaIa = new Intl.DateTimeFormat("pt-BR", {
+              timeZone: "America/Sao_Paulo",
+              hour: "2-digit",
+              minute: "2-digit",
+            }).format(tsConsultaIa);
+            const situacaoPayloadIa = (situacao: string) => ({
+              situacao,
+              medico: medicoIa,
+              especialidade: "Otorrinolaringologia",
+              servico: servicoIa,
+              data_consulta: dataConsultaIa,
+              hora_consulta: horaConsultaIa,
+            });
+            eventos.push({
+              tipo: "status_consulta",
+              chave,
+              telefone,
+              paciente,
+              payload: situacaoPayloadIa("Agendado"),
+              ts: tsDesfecho,
+            });
+            if (tsConsultaIa <= agora) {
+              const situacao = situacaoTerminal(0.85, 0.1);
+              const tsTerminalIa =
+                situacao === "Cancelado"
+                  ? new Date(tsConsultaIa.getTime() - entre(2, 48) * 3_600_000)
+                  : new Date(tsConsultaIa.getTime() + entre(10, 90) * 60_000);
+              if (tsTerminalIa <= agora) {
+                eventos.push({
+                  tipo: "status_consulta",
+                  chave,
+                  telefone,
+                  paciente,
+                  payload: situacaoPayloadIa(situacao),
+                  ts: tsTerminalIa,
+                });
+              }
+            }
+          }
         }
       }
     }
