@@ -10,6 +10,9 @@ const ORIGEM: Record<string, string> = {
   d0: "lembrete do dia",
   d1: "véspera",
   perdida: "consulta perdida",
+  fluxo_confirmacao: "fluxo de confirmação",
+  fluxo_perdida: "aviso de falta",
+  botao_ajuda_painel: "botão do painel",
 };
 
 function bateBusca(busca: string, ...campos: (string | null)[]): boolean {
@@ -64,13 +67,14 @@ export default function TabelaConfirmacoes({
             Pediram ajuda — ligar para o paciente
           </h2>
           <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-tinta-3">
                   <th className="py-1.5 pr-3 font-medium">Paciente</th>
                   <th className="py-1.5 pr-3 font-medium">Telefone</th>
                   <th className="py-1.5 pr-3 font-medium">Agendamento</th>
-                  <th className="py-1.5 font-medium">Quando pediu</th>
+                  <th className="py-1.5 pr-3 font-medium">Quando pediu</th>
+                  <th className="py-1.5 font-medium">Veio de</th>
                 </tr>
               </thead>
               <tbody>
@@ -81,7 +85,10 @@ export default function TabelaConfirmacoes({
                       <Telefone numero={a.telefone} />
                     </td>
                     <td className="py-2 pr-3 tabular-nums">{a.chave ?? "—"}</td>
-                    <td className="py-2 tabular-nums">{dataHoraBRT(a.ts)}</td>
+                    <td className="py-2 pr-3 tabular-nums">{dataHoraBRT(a.ts)}</td>
+                    <td className="py-2">
+                      <Badge>{a.origem ? (ORIGEM[a.origem] ?? a.origem) : "—"}</Badge>
+                    </td>
                   </tr>
                 ))}
               </tbody>
