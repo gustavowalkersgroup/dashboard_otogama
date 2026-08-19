@@ -434,3 +434,227 @@ export async function saudeApi(dias: Periodo): Promise<SaudeApi> {
     tempoForaS: foraMs / 1000,
   };
 }
+
+// ---------------------------------------------------- status das consultas
+//
+// Alimentado pelo poll horário do n8n na Konsist (tipo "status_consulta"),
+// não por webhook — granularidade de ~1h. "Agendado"/"Confirmado" (ainda sem
+// desfecho) são tratados como um único grupo "pendente" nas agregações;
+// "Cancelado" nunca entra no denominador de no-show (consulta que não chegou
+// a acontecer não é a mesma coisa que paciente que não apareceu).
+
+export type TaxaNoShow = {
+  realizado: number;
+  faltou: number;
+  cancelado: number;
+  pendente: number;
+  /** faltou / (faltou + realizado); null sem nenhum desfecho terminal no período. */
+  taxa: number | null;
+};
+
+/** Desfecho mais recente de cada consulta (por chave) no período, agregado. */
+export async function taxaNoShow(dias: Periodo): Promise<TaxaNoShow> {
+  const [linha] = await sql()`
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave) payload->>'situacao' AS situacao
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
+        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+      ORDER BY chave, ts DESC
+    )
+    SELECT
+      COUNT(*) FILTER (WHERE situacao = 'Realizado') AS realizado,
+      COUNT(*) FILTER (WHERE situacao = 'Faltou') AS faltou,
+      COUNT(*) FILTER (WHERE situacao = 'Cancelado') AS cancelado,
+      COUNT(*) FILTER (WHERE situacao IN ('Agendado', 'Confirmado')) AS pendente
+    FROM ultimos
+  `;
+  const realizado = n(linha?.realizado);
+  const faltou = n(linha?.faltou);
+  return {
+    realizado,
+    faltou,
+    cancelado: n(linha?.cancelado),
+    pendente: n(linha?.pendente),
+    taxa: realizado + faltou > 0 ? faltou / (realizado + faltou) : null,
+  };
+}
+
+export type PontoNoShow = { dia: string; realizado: number; faltou: number; taxa: number | null };
+
+/** Série diária de realizado/faltou pelo dia em que o desfecho foi detectado. */
+export async function serieNoShowDiaria(dias: Periodo): Promise<PontoNoShow[]> {
+  const linhas = await sql()`
+    SELECT (ts AT TIME ZONE 'America/Sao_Paulo')::date::text AS dia,
+      COUNT(*) FILTER (WHERE payload->>'situacao' = 'Realizado') AS realizado,
+      COUNT(*) FILTER (WHERE payload->>'situacao' = 'Faltou') AS faltou
+    FROM eventos
+    WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta' AND ts >= ${inicioPeriodo(dias)}
+    GROUP BY 1 ORDER BY 1
+  `;
+  const porDia = new Map(linhas.map((l) => [String(l.dia), l]));
+  const serie: PontoNoShow[] = [];
+  const cursor = inicioPeriodo(dias);
+  for (let i = 0; i < dias; i++) {
+    const dia = isoDiaBRT(cursor);
+    const l = porDia.get(dia);
+    const realizado = n(l?.realizado);
+    const faltou = n(l?.faltou);
+    serie.push({
+      dia,
+      realizado,
+      faltou,
+      taxa: realizado + faltou > 0 ? faltou / (realizado + faltou) : null,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return serie;
+}
+
+export type EstagioFunil = {
+  grupo: "com_lembrete" | "sem_lembrete";
+  agendado: number;
+  confirmado: number;
+  compareceu: number;
+};
+
+/**
+ * Funil Agendado → Confirmado → Compareceu, separado por quem recebeu (ou não)
+ * lembrete via WhatsApp. Só consultas com desfecho terminal Realizado/Faltou
+ * entram (cancelamentos não fazem parte deste funil).
+ */
+export async function funilComparecimento(dias: Periodo): Promise<EstagioFunil[]> {
+  const linhas = await sql()`
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave) chave, payload->>'situacao' AS situacao
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
+        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+        AND payload->>'situacao' IN ('Realizado', 'Faltou')
+      ORDER BY chave, ts DESC
+    ),
+    marcado AS (
+      SELECT
+        situacao,
+        EXISTS (
+          SELECT 1 FROM eventos e
+          WHERE e.tenant_id = ${TENANT} AND e.tipo = 'envio_lembrete' AND e.chave = u.chave
+        ) AS com_lembrete,
+        EXISTS (
+          SELECT 1 FROM eventos c
+          WHERE c.tenant_id = ${TENANT} AND c.tipo = 'confirmacao' AND c.chave = u.chave
+            AND c.payload->>'resultado' IN ('ok', 'ja_confirmado')
+        ) AS confirmado
+      FROM ultimos u
+    )
+    SELECT com_lembrete,
+      COUNT(*) AS agendado,
+      COUNT(*) FILTER (WHERE confirmado) AS confirmado,
+      COUNT(*) FILTER (WHERE situacao = 'Realizado') AS compareceu
+    FROM marcado
+    GROUP BY com_lembrete
+  `;
+  const porGrupo = new Map(linhas.map((l) => [Boolean(l.com_lembrete), l]));
+  return (["com_lembrete", "sem_lembrete"] as const).map((grupo) => {
+    const l = porGrupo.get(grupo === "com_lembrete");
+    return {
+      grupo,
+      agendado: n(l?.agendado),
+      confirmado: n(l?.confirmado),
+      compareceu: n(l?.compareceu),
+    };
+  });
+}
+
+export type DesfechoMedico = {
+  medico: string;
+  pendente: number;
+  realizado: number;
+  faltou: number;
+  cancelado: number;
+  total: number;
+};
+
+/** Desfecho mais recente por médico (top 12 por volume). */
+export async function desfechoPorMedico(dias: Periodo): Promise<DesfechoMedico[]> {
+  const linhas = await sql()`
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave)
+        chave, payload->>'situacao' AS situacao, payload->>'medico' AS medico
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
+        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+      ORDER BY chave, ts DESC
+    )
+    SELECT
+      COALESCE(medico, 'Não informado') AS medico,
+      COUNT(*) FILTER (WHERE situacao IN ('Agendado', 'Confirmado')) AS pendente,
+      COUNT(*) FILTER (WHERE situacao = 'Realizado') AS realizado,
+      COUNT(*) FILTER (WHERE situacao = 'Faltou') AS faltou,
+      COUNT(*) FILTER (WHERE situacao = 'Cancelado') AS cancelado,
+      COUNT(*) AS total
+    FROM ultimos
+    GROUP BY 1
+    ORDER BY total DESC
+    LIMIT 12
+  `;
+  return linhas.map((l) => ({
+    medico: String(l.medico),
+    pendente: n(l.pendente),
+    realizado: n(l.realizado),
+    faltou: n(l.faltou),
+    cancelado: n(l.cancelado),
+    total: n(l.total),
+  }));
+}
+
+export type ComparecimentoGrupo = {
+  grupo: "ia" | "humano";
+  pendente: number;
+  realizado: number;
+  faltou: number;
+  cancelado: number;
+  total: number;
+};
+
+/** Desfecho mais recente, separado por pré-agendamento criado pela IA vs manual. */
+export async function comparecimentoIaVsHumano(dias: Periodo): Promise<ComparecimentoGrupo[]> {
+  const linhas = await sql()`
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave) chave, payload->>'situacao' AS situacao
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
+        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+      ORDER BY chave, ts DESC
+    ),
+    marcado AS (
+      SELECT
+        situacao,
+        EXISTS (
+          SELECT 1 FROM eventos a
+          WHERE a.tenant_id = ${TENANT} AND a.tipo = 'agendamento_ia' AND a.chave = u.chave
+        ) AS via_ia
+      FROM ultimos u
+    )
+    SELECT via_ia,
+      COUNT(*) FILTER (WHERE situacao IN ('Agendado', 'Confirmado')) AS pendente,
+      COUNT(*) FILTER (WHERE situacao = 'Realizado') AS realizado,
+      COUNT(*) FILTER (WHERE situacao = 'Faltou') AS faltou,
+      COUNT(*) FILTER (WHERE situacao = 'Cancelado') AS cancelado,
+      COUNT(*) AS total
+    FROM marcado
+    GROUP BY via_ia
+  `;
+  const porGrupo = new Map(linhas.map((l) => [Boolean(l.via_ia), l]));
+  return (["ia", "humano"] as const).map((grupo) => {
+    const l = porGrupo.get(grupo === "ia");
+    return {
+      grupo,
+      pendente: n(l?.pendente),
+      realizado: n(l?.realizado),
+      faltou: n(l?.faltou),
+      cancelado: n(l?.cancelado),
+      total: n(l?.total),
+    };
+  });
+}

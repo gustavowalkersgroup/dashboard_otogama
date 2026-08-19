@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS eventos (
   tenant_id   TEXT NOT NULL DEFAULT 'otogama',
   tipo        TEXT NOT NULL,        -- envio_lembrete | confirmacao | precisa_ajuda
                                     -- | agendamento_ia | desfecho_agendamento | api_status
+                                    -- | status_consulta
   chave       TEXT,                 -- chave do agendamento na Konsist (1 linha POR chave)
   telefone    TEXT,                 -- E.164 sem '+', ex: 5561999998888
   paciente    TEXT,                 -- nome, quando disponível

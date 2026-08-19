@@ -12,6 +12,7 @@ const TIPOS = new Set([
   "agendamento_ia",
   "desfecho_agendamento",
   "api_status",
+  "status_consulta",
 ]);
 
 // Rate limit em memória (por instância): suficiente contra loop acidental de

@@ -30,7 +30,7 @@ x-api-key: <INGEST_API_KEY>
 
 | Campo | Obrigatório | Regras |
 |---|---|---|
-| `tipo` | sim | um de: `envio_lembrete`, `confirmacao`, `precisa_ajuda`, `agendamento_ia`, `desfecho_agendamento`, `api_status` |
+| `tipo` | sim | um de: `envio_lembrete`, `confirmacao`, `precisa_ajuda`, `agendamento_ia`, `desfecho_agendamento`, `api_status`, `status_consulta` |
 | `chave` | não | chave do agendamento na Konsist. Lista separada por vírgula/`;`/espaço é **expandida em N linhas** (uma por chave) |
 | `telefone` | não | E.164 sem `+` (ex.: `5561999998888`); não-dígitos são removidos; vazio é aceito |
 | `paciente` | não | nome, quando disponível |
@@ -128,7 +128,35 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
 }'
 ```
 
-### 6. `api_status` — monitor de uptime (só em transição de estado)
+### 6. `status_consulta` — poll horário na Konsist (agenda/desfecho)
+
+Diferente dos demais tipos (disparados por ação), este vem de um **poll periódico
+via GET direto na Konsist** (não webhook) — a API da clínica é instável, então em
+vez de tempo real, o n8n reconcilia a agenda a cada ~1h e só posta um evento
+quando a `situacao` observada de uma consulta **muda** desde o poll anterior
+(nunca 1 linha por hora por consulta parada no mesmo estado).
+
+`payload.situacao`: `"Agendado"` | `"Confirmado"` | `"Realizado"` | `"Faltou"` | `"Cancelado"`.
+`chave` é o id do agendamento na Konsist — mesmo espaço de chave usado em
+`envio_lembrete`/`confirmacao`/`agendamento_ia` quando aplicável, o que permite
+cruzar "recebeu lembrete" e "foi criado pela IA" com o desfecho real.
+
+```bash
+curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{
+  "tipo": "status_consulta",
+  "chave": "575382",
+  "ts": "2026-08-18T09:05:00-03:00",
+  "payload": { "situacao": "Realizado", "medico": "Dr. X", "especialidade": "Otorrino",
+               "servico": "Consulta Otorrino", "data_consulta": "18/08/2026", "hora_consulta": "09:00" }
+}'
+```
+
+**Importante para quem for implementar o poll:** `Faltou` precisa ser um status
+**distinto** de `Cancelado` na Konsist — se os dois caírem no mesmo status
+genérico de "cancelado", a métrica de no-show no dashboard fica contaminada por
+cancelamentos legítimos. Confirmar esse detalhe antes de ligar o poll em produção.
+
+### 7. `api_status` — monitor de uptime (só em transição de estado)
 
 Queda:
 

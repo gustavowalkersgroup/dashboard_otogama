@@ -16,6 +16,8 @@
   --color-bom: #0ca30c;          /* status: bom */
   --color-critico: #d03b3b;      /* status: crítico */
   --color-alerta: #fab219;       /* status: atenção */
+  --color-serio: #ec835a;        /* status: sério (ex.: cancelado) */
+  --color-neutro: #c3c2b7;       /* status: neutro/pendente (ainda não resolvido) */
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
