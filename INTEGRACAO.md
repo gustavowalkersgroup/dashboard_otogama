@@ -30,7 +30,7 @@ x-api-key: <INGEST_API_KEY>
 
 | Campo | Obrigatório | Regras |
 |---|---|---|
-| `tipo` | sim | um de: `envio_lembrete`, `confirmacao`, `precisa_ajuda`, `agendamento_ia`, `desfecho_agendamento`, `api_status`, `status_consulta`, `falha_envio` |
+| `tipo` | sim | um de: `envio_lembrete`, `confirmacao`, `precisa_ajuda`, `agendamento_ia`, `desfecho_agendamento`, `api_status`, `status_consulta`, `falha_envio`, `pedido_reagendamento` |
 | `chave` | não | chave do agendamento na Konsist. Lista separada por vírgula/`;`/espaço é **expandida em N linhas** (uma por chave) |
 | `telefone` | não | E.164 sem `+` (ex.: `5561999998888`); não-dígitos são removidos; vazio é aceito |
 | `paciente` | não | nome, quando disponível |
@@ -187,6 +187,31 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
   "telefone": "5561999998888",
   "paciente": "Maria Silva",
   "payload": { "origem": "d1", "motivo": "numero_invalido" }
+}'
+```
+
+### 9. `pedido_reagendamento` — paciente clicou em "reagendar" (NexTags)
+
+Registra a **intenção** de remarcar, disparada pelo botão que entrega a conversa
+para a IA reagendar. Não é confirmação — pelo contrário: o paciente está dizendo
+que *não* vai ao horário atual. Por isso **nunca** deve ir como `confirmacao`
+(inflaria a taxa de confirmação com quem não vai comparecer).
+
+O desfecho do pedido é rastreado à parte: se a IA conseguir marcar, o
+sub-workflow de agendamento loga um `agendamento_ia` com a **chave nova**. Ter os
+dois eventos permite medir a conversão "pediu para remarcar → remarcou de fato",
+e enxergar quem pediu e nunca converteu.
+
+`chave` é a do agendamento **antigo** (o que o paciente está abrindo mão).
+`payload.origem`: `"d0"` | `"d1"` | `"perdida"` — de qual aviso veio o pedido.
+
+```bash
+curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{
+  "tipo": "pedido_reagendamento",
+  "chave": "575382",
+  "telefone": "5561999998888",
+  "paciente": "Maria Silva",
+  "payload": { "origem": "d1", "tipo_consulta": "consulta" }
 }'
 ```
 

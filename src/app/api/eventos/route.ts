@@ -14,6 +14,7 @@ const TIPOS = new Set([
   "api_status",
   "status_consulta",
   "falha_envio",
+  "pedido_reagendamento",
 ]);
 
 // Rate limit em memória (por instância): suficiente contra loop acidental de
