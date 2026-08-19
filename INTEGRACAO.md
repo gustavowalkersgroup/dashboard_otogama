@@ -87,7 +87,7 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
 }'
 ```
 
-### 3. `precisa_ajuda` — External Request do painel NexTags (direto, sem n8n)
+### 3. `precisa_ajuda` — botão de atendimento humano (NexTags, direto, sem n8n)
 
 Body mínimo — a interpolação do NexTags é substituição crua de texto, então **só
 campos simples**, nunca texto livre:
@@ -96,9 +96,29 @@ campos simples**, nunca texto livre:
 { "tipo": "precisa_ajuda", "chave": "{{agendamento_chave}}", "telefone": "{{phone}}" }
 ```
 
+`payload.origem` diz **de onde** o paciente pediu atendimento, e é o que separa
+"pediu ajuda no fluxo de confirmação" de "perdeu a consulta e pediu ajuda".
+Valor **fixo por fluxo** (a coluna "Veio de" do dashboard mostra esse campo):
+
+| Valor | Onde fica o botão |
+|---|---|
+| `fluxo_confirmacao` | fluxo de lembrete/confirmação (D-0 e D-1) |
+| `fluxo_perdida` | fluxo de aviso de consulta perdida |
+| `botao_ajuda_painel` | botão avulso do painel NexTags |
+
+No `fluxo_confirmacao`, mande também `payload.lembrete_dia` (`"d0"`/`"d1"`) — ali
+o `origem` sozinho não separa os dois, porque D-0 e D-1 compartilham o mesmo fluxo.
+Nos demais, **não** use `{{lembrete_dia}}`: é campo persistente do contato e pode
+carregar valor velho de um lembrete anterior. Fixe o valor no corpo.
+
 ```bash
-curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" \
-  -d '{ "tipo": "precisa_ajuda", "chave": "575382", "telefone": "5561999998888" }'
+curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{
+  "tipo": "precisa_ajuda",
+  "chave": "575382",
+  "telefone": "5561999998888",
+  "paciente": "Maria Silva",
+  "payload": { "origem": "fluxo_perdida", "tipo_consulta": "consulta" }
+}'
 ```
 
 (`ts` ausente → o dashboard usa o horário do recebimento; `paciente` é opcional.)

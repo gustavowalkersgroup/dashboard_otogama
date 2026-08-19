@@ -201,13 +201,14 @@ export type PedidoAjuda = {
   chave: string | null;
   paciente: string | null;
   telefone: string | null;
+  origem: string | null;
   ts: string;
 };
 
 export async function listaPedidosAjuda(dias: Periodo): Promise<PedidoAjuda[]> {
   const linhas = await sql()`
     SELECT DISTINCT ON (COALESCE(chave, ''), COALESCE(telefone, ''))
-      chave, paciente, telefone, ts
+      chave, paciente, telefone, ts, payload->>'origem' AS origem
     FROM eventos
     WHERE tenant_id = ${TENANT} AND tipo = 'precisa_ajuda' AND ts >= ${inicioPeriodo(dias)}
     ORDER BY COALESCE(chave, ''), COALESCE(telefone, ''), ts DESC
@@ -218,6 +219,7 @@ export async function listaPedidosAjuda(dias: Periodo): Promise<PedidoAjuda[]> {
       chave: (l.chave as string) ?? null,
       paciente: (l.paciente as string) ?? null,
       telefone: (l.telefone as string) ?? null,
+      origem: (l.origem as string) ?? null,
       ts: new Date(l.ts as string).toISOString(),
     }))
     .sort((a, b) => b.ts.localeCompare(a.ts));

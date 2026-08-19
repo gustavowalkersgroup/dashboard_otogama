@@ -195,7 +195,7 @@ for (let off = DIAS; off >= 0; off--) {
           chave: chaves[0],
           telefone,
           paciente,
-          payload: {},
+          payload: { origem: "fluxo_confirmacao" },
           ts: tsAjuda,
         });
       }
