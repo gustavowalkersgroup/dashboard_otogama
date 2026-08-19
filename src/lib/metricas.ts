@@ -236,6 +236,10 @@ export type AgendamentoIa = {
   statusAtual: string;
   criadoEm: string;
   desfechoEm: string | null;
+  /** Data/hora da consulta marcada, vindas do poll da agenda (status_consulta) — só existe
+   * depois que o poll observa a consulta real na Konsist; nunca existe para "Recusado". */
+  dataConsultaMarcada: string | null;
+  horaConsultaMarcada: string | null;
 };
 
 export async function listaAgendamentosIa(dias: Periodo): Promise<AgendamentoIa[]> {
@@ -249,7 +253,9 @@ export async function listaAgendamentosIa(dias: Periodo): Promise<AgendamentoIa[
         a.payload->>'servico' AS servico,
         a.payload->>'status' AS status_inicial,
         d.status AS status_desfecho,
-        d.ts AS desfecho_ts
+        d.ts AS desfecho_ts,
+        s.data_consulta,
+        s.hora_consulta
       FROM eventos a
       LEFT JOIN LATERAL (
         SELECT d2.payload->>'status' AS status, d2.ts
@@ -258,6 +264,14 @@ export async function listaAgendamentosIa(dias: Periodo): Promise<AgendamentoIa[
           AND d2.chave = a.chave
         ORDER BY d2.ts DESC LIMIT 1
       ) d ON true
+      LEFT JOIN LATERAL (
+        SELECT s2.payload->>'data_consulta' AS data_consulta,
+               s2.payload->>'hora_consulta' AS hora_consulta
+        FROM eventos s2
+        WHERE s2.tenant_id = a.tenant_id AND s2.tipo = 'status_consulta'
+          AND s2.chave = a.chave
+        ORDER BY s2.ts DESC LIMIT 1
+      ) s ON true
       WHERE a.tenant_id = ${TENANT} AND a.tipo = 'agendamento_ia'
         AND a.ts >= ${inicioPeriodo(dias)}
       ORDER BY COALESCE(a.chave, a.id::text), a.ts DESC
@@ -276,6 +290,8 @@ export async function listaAgendamentosIa(dias: Periodo): Promise<AgendamentoIa[
     statusAtual: String(l.status_desfecho ?? l.status_inicial ?? "Em Análise"),
     criadoEm: new Date(l.ts as string).toISOString(),
     desfechoEm: l.desfecho_ts ? new Date(l.desfecho_ts as string).toISOString() : null,
+    dataConsultaMarcada: (l.data_consulta as string) ?? null,
+    horaConsultaMarcada: (l.hora_consulta as string) ?? null,
   }));
 }
 
