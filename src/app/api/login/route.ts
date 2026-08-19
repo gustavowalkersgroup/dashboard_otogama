@@ -5,16 +5,32 @@ import { COOKIE_SESSAO, OPCOES_COOKIE, criarTokenSessao } from "@/lib/sessao";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function senhaCorreta(recebida: string): boolean {
+// Espaço/quebra de linha no fim do valor é acidente de copiar-e-colar no painel
+// da Vercel, não senha — sem o trim vira um 401 impossível de diagnosticar.
+function senhaEsperada(): string {
+  // alias evita o inline de `process.env.X` do bundler (mesma causa do bug em db.ts)
   const env: Record<string, string | undefined> = process.env;
-  const esperada = env.DASHBOARD_PASSWORD;
-  if (!esperada) return false;
+  return (env.DASHBOARD_PASSWORD ?? "").trim();
+}
+
+function senhaCorreta(recebida: string, esperada: string): boolean {
   const a = createHash("sha256").update(recebida).digest();
   const b = createHash("sha256").update(esperada).digest();
   return timingSafeEqual(a, b);
 }
 
 export async function POST(req: NextRequest) {
+  // Configuração ausente não pode responder 401: 401 diz "sua senha está errada"
+  // e manda o operador procurar no lugar errado. Falha alto, como o SESSION_SECRET.
+  const esperada = senhaEsperada();
+  if (!esperada) {
+    console.error("DASHBOARD_PASSWORD ausente ou vazia no ambiente deste deployment.");
+    return NextResponse.json(
+      { erro: "DASHBOARD_PASSWORD ausente ou vazia neste deployment." },
+      { status: 500 },
+    );
+  }
+
   let senha = "";
   try {
     const corpo = await req.json();
@@ -23,7 +39,7 @@ export async function POST(req: NextRequest) {
     // corpo inválido cai no fluxo de senha errada
   }
 
-  if (!senha || !senhaCorreta(senha)) {
+  if (!senha || !senhaCorreta(senha, esperada)) {
     // atraso fixo desencoraja força bruta sem infraestrutura extra
     await new Promise((r) => setTimeout(r, 800));
     return NextResponse.json({ erro: "senha incorreta" }, { status: 401 });
