@@ -30,7 +30,7 @@ x-api-key: <INGEST_API_KEY>
 
 | Campo | Obrigatório | Regras |
 |---|---|---|
-| `tipo` | sim | um de: `envio_lembrete`, `confirmacao`, `precisa_ajuda`, `agendamento_ia`, `desfecho_agendamento`, `api_status`, `status_consulta` |
+| `tipo` | sim | um de: `envio_lembrete`, `confirmacao`, `precisa_ajuda`, `agendamento_ia`, `desfecho_agendamento`, `api_status`, `status_consulta`, `falha_envio` |
 | `chave` | não | chave do agendamento na Konsist. Lista separada por vírgula/`;`/espaço é **expandida em N linhas** (uma por chave) |
 | `telefone` | não | E.164 sem `+` (ex.: `5561999998888`); não-dígitos são removidos; vazio é aceito |
 | `paciente` | não | nome, quando disponível |
@@ -170,6 +170,24 @@ Recuperação (com duração da queda em minutos):
 ```bash
 curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" \
   -d '{ "tipo": "api_status", "payload": { "estado": "ok", "detalhe": "HTTP 502 — processo parado", "duracao_min": 42 } }'
+```
+
+### 8. `falha_envio` — WhatsApp não conseguiu entregar o lembrete (NexTags)
+
+Contraparte do `envio_lembrete` quando a mensagem falha na entrega (número
+inválido, bloqueado, etc.) — hoje sem visibilidade nenhuma no dashboard.
+**Não conta como lembrete enviado** (não entra em `envio_lembrete`); é um evento
+próprio, ainda sem tela dedicada — fica registrado para quando fizer sentido
+construir uma visão disso.
+
+```bash
+curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{
+  "tipo": "falha_envio",
+  "chave": "575382",
+  "telefone": "5561999998888",
+  "paciente": "Maria Silva",
+  "payload": { "origem": "d1", "motivo": "numero_invalido" }
+}'
 ```
 
 ## Testes de sanidade

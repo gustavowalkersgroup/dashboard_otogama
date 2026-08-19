@@ -13,6 +13,7 @@ const TIPOS = new Set([
   "desfecho_agendamento",
   "api_status",
   "status_consulta",
+  "falha_envio",
 ]);
 
 // Rate limit em memória (por instância): suficiente contra loop acidental de
