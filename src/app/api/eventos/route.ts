@@ -34,11 +34,16 @@ function estourouRateLimit(): boolean {
   return contagemJanela > LIMITE_POR_MINUTO;
 }
 
-function chaveValida(recebida: string | null): boolean {
+// Espaço/quebra de linha no fim do valor é acidente de copiar-e-colar no painel
+// da Vercel, não chave — sem o trim vira um 401 impossível de diagnosticar.
+function chaveEsperada(): string {
   const env: Record<string, string | undefined> = process.env;
-  const esperada = env.INGEST_API_KEY;
-  if (!esperada || !recebida) return false;
-  const a = createHash("sha256").update(recebida).digest();
+  return (env.INGEST_API_KEY ?? "").trim();
+}
+
+function chaveValida(recebida: string | null, esperada: string): boolean {
+  if (!recebida) return false;
+  const a = createHash("sha256").update(recebida.trim()).digest();
   const b = createHash("sha256").update(esperada).digest();
   return timingSafeEqual(a, b);
 }
@@ -54,7 +59,17 @@ function expandirChaves(chave: unknown): (string | null)[] {
 }
 
 export async function POST(req: NextRequest) {
-  if (!chaveValida(req.headers.get("x-api-key"))) {
+  // Configuração ausente não pode responder 401: 401 diz "sua chave está errada"
+  // e manda quem integra caçar o problema no n8n, quando ele está no deployment.
+  const esperada = chaveEsperada();
+  if (!esperada) {
+    console.error("INGEST_API_KEY ausente ou vazia no ambiente deste deployment.");
+    return NextResponse.json(
+      { erro: "INGEST_API_KEY ausente ou vazia neste deployment." },
+      { status: 500 },
+    );
+  }
+  if (!chaveValida(req.headers.get("x-api-key"), esperada)) {
     return NextResponse.json({ erro: "api key inválida ou ausente" }, { status: 401 });
   }
   if (estourouRateLimit()) {
