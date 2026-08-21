@@ -24,7 +24,15 @@ export default function PaginaLogin() {
         router.refresh();
         return;
       }
-      setErro(resp.status === 401 ? "Senha incorreta." : "Erro ao entrar — tente de novo.");
+      if (resp.status === 401) {
+        setErro("Senha incorreta.");
+        return;
+      }
+      // Erro de configuração (ex.: DASHBOARD_PASSWORD ausente no deployment):
+      // mostrar o motivo do servidor, senão fica indistinguível de senha errada
+      // e manda quem administra procurar no lugar errado.
+      const corpo = await resp.json().catch(() => null);
+      setErro(corpo?.erro ? `Erro do servidor: ${corpo.erro}` : "Erro ao entrar — tente de novo.");
     } catch {
       setErro("Erro de rede — tente de novo.");
     } finally {
