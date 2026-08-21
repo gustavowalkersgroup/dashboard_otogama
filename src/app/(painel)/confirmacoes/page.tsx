@@ -10,6 +10,7 @@ import {
   listaPendentes,
   PENDENTE_APOS_HORAS,
   periodoValido,
+  rotuloPeriodo,
 } from "@/lib/metricas";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +48,7 @@ export default async function Confirmacoes({
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">Confirmações · últimos {dias} dias</h2>
+        <h2 className="text-base font-semibold">Confirmações · {rotuloPeriodo(dias)}</h2>
         <FiltroPeriodo dias={dias} />
       </div>
 

@@ -1,13 +1,79 @@
+import { cache } from "react";
 import { sql, TENANT } from "@/lib/db";
-import { inicioPeriodo } from "@/lib/formato";
+import {
+  type DiaRelativo,
+  ROTULO_DIA,
+  inicioPeriodo,
+  isoDiaRelativo,
+  janelaDia,
+} from "@/lib/formato";
 
 export const PERIODOS = [7, 30, 90] as const;
-export type Periodo = (typeof PERIODOS)[number];
+export const DIAS_RELATIVOS = ["ontem", "hoje", "amanha"] as const;
+
+export type Periodo = (typeof PERIODOS)[number] | DiaRelativo;
+
+export function ehDiaRelativo(p: Periodo): p is DiaRelativo {
+  return typeof p === "string";
+}
 
 export function periodoValido(p: string | undefined): Periodo {
+  if (p && (DIAS_RELATIVOS as readonly string[]).includes(p)) return p as DiaRelativo;
   const n = Number(p);
-  return (PERIODOS as readonly number[]).includes(n) ? (n as Periodo) : 30;
+  return (PERIODOS as readonly number[]).includes(n) ? (n as (typeof PERIODOS)[number]) : 30;
 }
+
+/** Rótulo do recorte para títulos: "hoje", "amanhã", "últimos 30 dias". */
+export function rotuloPeriodo(p: Periodo): string {
+  if (ehDiaRelativo(p)) return ROTULO_DIA[p].toLowerCase();
+  return `últimos ${p} dias`;
+}
+
+/**
+ * Os dois recortes do dashboard respondem a perguntas diferentes:
+ *
+ * - 7/30/90 dias: "o que a automação fez nesse intervalo" — recorta por data do
+ *   EVENTO (quando o lembrete saiu, quando o paciente confirmou).
+ * - hoje/ontem/amanhã: "como está a agenda desse dia" — recorta por data da
+ *   CONSULTA. Por data de evento, "amanhã" viria sempre vazio: nada acontece no
+ *   futuro. O que interessa é quem tem consulta amanhã e já confirmou.
+ *
+ * A data da consulta não é coluna: vive em `payload.data_consulta` (DD/MM/YYYY),
+ * e só os tipos que a conhecem a preenchem. Então o recorte por dia é resolvido
+ * em dois passos — primeiro descobre-se o conjunto de chaves daquele dia, depois
+ * cada métrica filtra por ele. `cache` evita repetir essa busca a cada métrica
+ * dentro do mesmo render.
+ */
+type Recorte = {
+  desde: Date;
+  /** true = recorte por período; nenhum filtro por chave. */
+  todos: boolean;
+  chaves: string[];
+  dia: DiaRelativo | null;
+};
+
+const SEM_PISO = new Date(0);
+
+export const recorte = cache(async (p: Periodo): Promise<Recorte> => {
+  if (!ehDiaRelativo(p)) {
+    return { desde: inicioPeriodo(p), todos: true, chaves: [], dia: null };
+  }
+  const linhas = await sql()`
+    SELECT DISTINCT chave
+    FROM eventos
+    WHERE tenant_id = ${TENANT}
+      AND chave IS NOT NULL
+      AND tipo IN ('envio_lembrete', 'status_consulta', 'desfecho_agendamento')
+      AND payload->>'data_consulta' ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
+      AND to_date(payload->>'data_consulta', 'DD/MM/YYYY') = ${isoDiaRelativo(p)}::date
+  `;
+  return {
+    desde: SEM_PISO,
+    todos: false,
+    chaves: linhas.map((l) => String(l.chave)),
+    dia: p,
+  };
+});
 
 // alias evita o inline de `process.env.X` do bundler (mesma causa do bug em db.ts)
 const env: Record<string, string | undefined> = process.env;
@@ -27,10 +93,12 @@ const n = (v: unknown): number => Number(v ?? 0);
 // ---------------------------------------------------------------- lembretes
 
 export async function contagemLembretes(dias: Periodo) {
+  const r = await recorte(dias);
   const [linha] = await sql()`
     SELECT COUNT(DISTINCT (telefone, ts)) AS mensagens, COUNT(*) AS agendamentos
     FROM eventos
-    WHERE tenant_id = ${TENANT} AND tipo = 'envio_lembrete' AND ts >= ${inicioPeriodo(dias)}
+    WHERE tenant_id = ${TENANT} AND tipo = 'envio_lembrete' AND ts >= ${r.desde}
+      AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
   `;
   return { mensagens: n(linha?.mensagens), agendamentos: n(linha?.agendamentos) };
 }
@@ -38,6 +106,7 @@ export async function contagemLembretes(dias: Periodo) {
 // -------------------------------------------------------------- confirmações
 
 export async function contagemConfirmacoes(dias: Periodo) {
+  const r = await recorte(dias);
   const [linha] = await sql()`
     SELECT
       COUNT(*) FILTER (WHERE payload->>'resultado' IN ('ok','ja_confirmado')) AS total,
@@ -47,7 +116,8 @@ export async function contagemConfirmacoes(dias: Periodo) {
       COUNT(*) FILTER (WHERE payload->>'resultado' = 'ja_confirmado') AS ja_confirmado,
       COUNT(*) FILTER (WHERE payload->>'resultado' = 'sem_paciente') AS sem_paciente
     FROM eventos
-    WHERE tenant_id = ${TENANT} AND tipo = 'confirmacao' AND ts >= ${inicioPeriodo(dias)}
+    WHERE tenant_id = ${TENANT} AND tipo = 'confirmacao' AND ts >= ${r.desde}
+      AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
   `;
   return {
     total: n(linha?.total),
@@ -60,12 +130,14 @@ export async function contagemConfirmacoes(dias: Periodo) {
 
 /** Taxa por agendamento: chaves avisadas no período × chaves com confirmação posterior. */
 export async function taxaConfirmacao(dias: Periodo) {
+  const r = await recorte(dias);
   const [linha] = await sql()`
     WITH envios AS (
       SELECT chave, MIN(ts) AS primeiro_envio
       FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'envio_lembrete'
-        AND ts >= ${inicioPeriodo(dias)} AND chave IS NOT NULL
+        AND ts >= ${r.desde} AND chave IS NOT NULL
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
       GROUP BY chave
     )
     SELECT
@@ -85,6 +157,7 @@ export async function taxaConfirmacao(dias: Periodo) {
 
 /** Mediana e média de (confirmação − envio mais recente anterior), descartando <0 ou >72h. */
 export async function tempoAteConfirmar(dias: Periodo) {
+  const r = await recorte(dias);
   const [linha] = await sql()`
     WITH pares AS (
       SELECT EXTRACT(EPOCH FROM c.ts - e.envio_ts) AS delta_s
@@ -96,7 +169,8 @@ export async function tempoAteConfirmar(dias: Periodo) {
         ORDER BY e2.ts DESC LIMIT 1
       ) e ON true
       WHERE c.tenant_id = ${TENANT} AND c.tipo = 'confirmacao'
-        AND c.ts >= ${inicioPeriodo(dias)} AND c.chave IS NOT NULL
+        AND c.ts >= ${r.desde} AND c.chave IS NOT NULL
+        AND (${r.todos}::bool OR c.chave = ANY(${r.chaves}::text[]))
         AND c.payload->>'resultado' IN ('ok','ja_confirmado')
     )
     SELECT
@@ -124,6 +198,7 @@ export type Confirmado = {
 
 /** Primeira confirmação de cada chave no período, com delta desde o envio. */
 export async function listaConfirmados(dias: Periodo): Promise<Confirmado[]> {
+  const r = await recorte(dias);
   const linhas = await sql()`
     SELECT * FROM (
       SELECT DISTINCT ON (c.chave)
@@ -138,7 +213,8 @@ export async function listaConfirmados(dias: Periodo): Promise<Confirmado[]> {
         ORDER BY e2.ts DESC LIMIT 1
       ) e ON true
       WHERE c.tenant_id = ${TENANT} AND c.tipo = 'confirmacao'
-        AND c.ts >= ${inicioPeriodo(dias)} AND c.chave IS NOT NULL
+        AND c.ts >= ${r.desde} AND c.chave IS NOT NULL
+        AND (${r.todos}::bool OR c.chave = ANY(${r.chaves}::text[]))
         AND c.payload->>'resultado' IN ('ok','ja_confirmado')
       ORDER BY c.chave, c.ts ASC
     ) t
@@ -168,13 +244,15 @@ export type Pendente = {
 
 /** Avisados sem confirmação, com pelo menos PENDENTE_APOS_HORAS desde o envio. */
 export async function listaPendentes(dias: Periodo): Promise<Pendente[]> {
+  const r = await recorte(dias);
   const linhas = await sql()`
     WITH envios AS (
       SELECT DISTINCT ON (chave)
         chave, paciente, telefone, ts, payload->>'origem' AS origem
       FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'envio_lembrete'
-        AND ts >= ${inicioPeriodo(dias)} AND chave IS NOT NULL
+        AND ts >= ${r.desde} AND chave IS NOT NULL
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
       ORDER BY chave, ts DESC
     )
     SELECT * FROM envios e
@@ -206,11 +284,13 @@ export type PedidoAjuda = {
 };
 
 export async function listaPedidosAjuda(dias: Periodo): Promise<PedidoAjuda[]> {
+  const r = await recorte(dias);
   const linhas = await sql()`
     SELECT DISTINCT ON (COALESCE(chave, ''), COALESCE(telefone, ''))
       chave, paciente, telefone, ts, payload->>'origem' AS origem
     FROM eventos
-    WHERE tenant_id = ${TENANT} AND tipo = 'precisa_ajuda' AND ts >= ${inicioPeriodo(dias)}
+    WHERE tenant_id = ${TENANT} AND tipo = 'precisa_ajuda' AND ts >= ${r.desde}
+      AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
     ORDER BY COALESCE(chave, ''), COALESCE(telefone, ''), ts DESC
     LIMIT 200
   `;
@@ -245,6 +325,7 @@ export type AgendamentoIa = {
 };
 
 export async function listaAgendamentosIa(dias: Periodo): Promise<AgendamentoIa[]> {
+  const r = await recorte(dias);
   const linhas = await sql()`
     SELECT * FROM (
       SELECT DISTINCT ON (COALESCE(a.chave, a.id::text))
@@ -275,7 +356,8 @@ export async function listaAgendamentosIa(dias: Periodo): Promise<AgendamentoIa[
         ORDER BY s2.ts DESC LIMIT 1
       ) s ON true
       WHERE a.tenant_id = ${TENANT} AND a.tipo = 'agendamento_ia'
-        AND a.ts >= ${inicioPeriodo(dias)}
+        AND a.ts >= ${r.desde}
+        AND (${r.todos}::bool OR a.chave = ANY(${r.chaves}::text[]))
       ORDER BY COALESCE(a.chave, a.id::text), a.ts DESC
     ) t
     ORDER BY t.ts DESC
@@ -310,6 +392,9 @@ export function resumoAgendamentosIa(lista: AgendamentoIa[]) {
 export type PontoDiario = { dia: string; envios: number; confirmacoes: number };
 
 export async function serieDiaria(dias: Periodo): Promise<PontoDiario[]> {
+  // Série por dia não faz sentido num recorte de um dia só — daria uma barra.
+  // Devolve vazio e a página esconde o gráfico.
+  if (ehDiaRelativo(dias)) return [];
   const linhas = await sql()`
     SELECT (ts AT TIME ZONE 'America/Sao_Paulo')::date::text AS dia,
       COUNT(DISTINCT (telefone, ts)) FILTER (WHERE tipo = 'envio_lembrete') AS envios,
@@ -372,13 +457,25 @@ export type SaudeApi = {
 };
 
 export async function saudeApi(dias: Periodo): Promise<SaudeApi> {
-  const inicio = inicioPeriodo(dias);
+  // Uptime é a única métrica que não se recorta por agenda: `api_status` não tem
+  // chave de agendamento. Num recorte de dia, o corte natural é a janela do
+  // próprio dia — "a API caiu ontem?". Para "amanhã" não há o que medir e o
+  // uptime sai nulo, que é a resposta honesta.
+  let inicio: Date;
+  let fim: Date;
+  if (ehDiaRelativo(dias)) {
+    ({ inicio, fim } = janelaDia(dias));
+  } else {
+    inicio = inicioPeriodo(dias);
+    fim = new Date(8_640_000_000_000_000);
+  }
   const [eventos, [ultimo]] = await Promise.all([
     sql()`
       SELECT ts, payload->>'estado' AS estado, payload->>'detalhe' AS detalhe,
              payload->>'duracao_min' AS duracao_min
       FROM eventos
-      WHERE tenant_id = ${TENANT} AND tipo = 'api_status' AND ts >= ${inicio}
+      WHERE tenant_id = ${TENANT} AND tipo = 'api_status'
+        AND ts >= ${inicio} AND ts < ${fim}
       ORDER BY ts ASC
     `,
     sql()`
@@ -432,11 +529,12 @@ export async function saudeApi(dias: Periodo): Promise<SaudeApi> {
 
   // downtime recortado ao período, para o uptime %
   const inicioMs = inicio.getTime();
-  const totalMs = agora - inicioMs;
+  const ateMs = Math.min(agora, fim.getTime());
+  const totalMs = ateMs - inicioMs;
   let foraMs = 0;
   for (const q of quedas) {
     const a = Math.max(new Date(q.inicio).getTime(), inicioMs);
-    const b = q.fim ? new Date(q.fim).getTime() : agora;
+    const b = Math.min(q.fim ? new Date(q.fim).getTime() : agora, ateMs);
     if (b > a) foraMs += b - a;
   }
 
@@ -472,12 +570,14 @@ export type TaxaNoShow = {
 
 /** Desfecho mais recente de cada consulta (por chave) no período, agregado. */
 export async function taxaNoShow(dias: Periodo): Promise<TaxaNoShow> {
+  const r = await recorte(dias);
   const [linha] = await sql()`
     WITH ultimos AS (
       SELECT DISTINCT ON (chave) payload->>'situacao' AS situacao
       FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
-        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+        AND chave IS NOT NULL AND ts >= ${r.desde}
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
       ORDER BY chave, ts DESC
     )
     SELECT
@@ -502,6 +602,8 @@ export type PontoNoShow = { dia: string; realizado: number; faltou: number; taxa
 
 /** Série diária de realizado/faltou pelo dia em que o desfecho foi detectado. */
 export async function serieNoShowDiaria(dias: Periodo): Promise<PontoNoShow[]> {
+  // Mesmo motivo do serieDiaria: um dia só não vira série.
+  if (ehDiaRelativo(dias)) return [];
   const linhas = await sql()`
     SELECT (ts AT TIME ZONE 'America/Sao_Paulo')::date::text AS dia,
       COUNT(*) FILTER (WHERE payload->>'situacao' = 'Realizado') AS realizado,
@@ -542,12 +644,14 @@ export type EstagioFunil = {
  * entram (cancelamentos não fazem parte deste funil).
  */
 export async function funilComparecimento(dias: Periodo): Promise<EstagioFunil[]> {
+  const r = await recorte(dias);
   const linhas = await sql()`
     WITH ultimos AS (
       SELECT DISTINCT ON (chave) chave, payload->>'situacao' AS situacao
       FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
-        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+        AND chave IS NOT NULL AND ts >= ${r.desde}
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
         AND payload->>'situacao' IN ('Realizado', 'Faltou')
       ORDER BY chave, ts DESC
     ),
@@ -595,13 +699,15 @@ export type DesfechoMedico = {
 
 /** Desfecho mais recente por médico (top 12 por volume). */
 export async function desfechoPorMedico(dias: Periodo): Promise<DesfechoMedico[]> {
+  const r = await recorte(dias);
   const linhas = await sql()`
     WITH ultimos AS (
       SELECT DISTINCT ON (chave)
         chave, payload->>'situacao' AS situacao, payload->>'medico' AS medico
       FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
-        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+        AND chave IS NOT NULL AND ts >= ${r.desde}
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
       ORDER BY chave, ts DESC
     )
     SELECT
@@ -637,12 +743,14 @@ export type ComparecimentoGrupo = {
 
 /** Desfecho mais recente, separado por pré-agendamento criado pela IA vs manual. */
 export async function comparecimentoIaVsHumano(dias: Periodo): Promise<ComparecimentoGrupo[]> {
+  const r = await recorte(dias);
   const linhas = await sql()`
     WITH ultimos AS (
       SELECT DISTINCT ON (chave) chave, payload->>'situacao' AS situacao
       FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
-        AND chave IS NOT NULL AND ts >= ${inicioPeriodo(dias)}
+        AND chave IS NOT NULL AND ts >= ${r.desde}
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
       ORDER BY chave, ts DESC
     ),
     marcado AS (

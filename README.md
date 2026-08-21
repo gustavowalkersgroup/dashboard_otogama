@@ -118,6 +118,19 @@ Todos POSTam em `/api/eventos` com o header `x-api-key`. Os nodes de log devem r
 
 ## Métricas — como cada número é calculado
 
+O filtro tem duas escalas, que respondem a perguntas diferentes:
+
+- **7 / 30 / 90 dias** — recorta pela data do **evento**: o que a automação fez
+  no intervalo (lembretes disparados, confirmações recebidas).
+- **Ontem / Hoje / Amanhã** — recorta pela data da **consulta**: como está a
+  agenda daquele dia. Por data de evento "amanhã" viria sempre vazio (nada
+  acontece no futuro); o que interessa é quem tem consulta amanhã e já
+  confirmou. A data da consulta vem de `payload.data_consulta`, então só entram
+  no recorte as chaves que algum evento datou — os gráficos de série por dia
+  ficam ocultos (um dia só não vira série) e o uptime da API, que não tem chave
+  de agendamento, usa a janela do próprio dia.
+
+
 | Métrica | Cálculo |
 |---|---|
 | Consultas marcadas pela IA | eventos `agendamento_ia`; status atual vem do último `desfecho_agendamento` da mesma chave |
