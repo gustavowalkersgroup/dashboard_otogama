@@ -43,6 +43,33 @@ export function inicioPeriodo(dias: number): Date {
   return inicio;
 }
 
+export type DiaRelativo = "hoje" | "ontem" | "amanha";
+
+const DESLOCAMENTO: Record<DiaRelativo, number> = { ontem: -1, hoje: 0, amanha: 1 };
+
+export const ROTULO_DIA: Record<DiaRelativo, string> = {
+  ontem: "Ontem",
+  hoje: "Hoje",
+  amanha: "Amanhã",
+};
+
+/** Data do dia BRT em ISO (YYYY-MM-DD) — é por ela que se acha a agenda do dia. */
+export function isoDiaRelativo(dia: DiaRelativo): string {
+  // meio-dia evita que o deslocamento de fuso jogue para o dia vizinho
+  const hojeBRT = new Intl.DateTimeFormat("en-CA", { timeZone: FUSO }).format(new Date());
+  const d = new Date(`${hojeBRT}T12:00:00-03:00`);
+  d.setUTCDate(d.getUTCDate() + DESLOCAMENTO[dia]);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: FUSO }).format(d);
+}
+
+/** Janela [início, fim) do dia BRT em UTC — para o que se recorta por data do evento. */
+export function janelaDia(dia: DiaRelativo): { inicio: Date; fim: Date } {
+  const inicio = new Date(`${isoDiaRelativo(dia)}T00:00:00-03:00`);
+  const fim = new Date(inicio);
+  fim.setUTCDate(fim.getUTCDate() + 1);
+  return { inicio, fim };
+}
+
 /** "3h 24min", "12min", "1d 4h" — para deltas e duração de quedas. */
 export function duracaoHumana(segundos: number): string {
   const s = Math.round(segundos);

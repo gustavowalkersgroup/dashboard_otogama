@@ -4,7 +4,7 @@ import FiltroPeriodo from "@/components/FiltroPeriodo";
 import GraficoDesfechoMedico from "@/components/GraficoDesfechoMedico";
 import GraficoNoShowDiario from "@/components/GraficoNoShowDiario";
 import { numeroBR } from "@/lib/formato";
-import { desfechoPorMedico, periodoValido, serieNoShowDiaria, taxaNoShow } from "@/lib/metricas";
+import { desfechoPorMedico, periodoValido, serieNoShowDiaria, taxaNoShow, rotuloPeriodo } from "@/lib/metricas";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +41,7 @@ export default async function Agenda({
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">Agenda · últimos {dias} dias</h2>
+        <h2 className="text-base font-semibold">Agenda · {rotuloPeriodo(dias)}</h2>
         <FiltroPeriodo dias={dias} />
       </div>
 
@@ -61,9 +61,11 @@ export default async function Agenda({
         <CardMetrica rotulo="Pendentes" valor={numeroBR(noShow.pendente)} detalhe="agendado/confirmado, ainda sem desfecho" />
       </div>
 
-      <div className="mt-4">
-        <GraficoNoShowDiario serie={serie} />
-      </div>
+      {serie.length > 0 && (
+        <div className="mt-4">
+          <GraficoNoShowDiario serie={serie} />
+        </div>
+      )}
 
       <div className="mt-4">
         <GraficoDesfechoMedico dados={porMedico} />
