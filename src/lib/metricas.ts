@@ -558,6 +558,10 @@ export async function saudeApi(dias: Periodo): Promise<SaudeApi> {
 // desfecho) são tratados como um único grupo "pendente" nas agregações;
 // "Cancelado" nunca entra no denominador de no-show (consulta que não chegou
 // a acontecer não é a mesma coisa que paciente que não apareceu).
+//
+// O ts destes eventos é o horário da consulta, não o do poll, então os recortes
+// de 7/30/90 dias aqui recortam por dia de consulta — e alcançam os 7 dias à
+// frente que o poll também varre, que aparecem como pendentes.
 
 export type TaxaNoShow = {
   realizado: number;
@@ -600,7 +604,8 @@ export async function taxaNoShow(dias: Periodo): Promise<TaxaNoShow> {
 
 export type PontoNoShow = { dia: string; realizado: number; faltou: number; taxa: number | null };
 
-/** Série diária de realizado/faltou pelo dia em que o desfecho foi detectado. */
+/** Série diária de realizado/faltou pelo dia da consulta (o poll grava o evento
+ * com o ts da consulta, não o do momento em que percebeu — ver INTEGRACAO.md §6). */
 export async function serieNoShowDiaria(dias: Periodo): Promise<PontoNoShow[]> {
   // Mesmo motivo do serieDiaria: um dia só não vira série.
   if (ehDiaRelativo(dias)) return [];

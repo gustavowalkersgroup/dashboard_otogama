@@ -150,16 +150,58 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
 
 ### 6. `status_consulta` — poll horário na Konsist (agenda/desfecho)
 
+Implementado pelo workflow n8n **"Otogama - Poll Status Consulta (Agenda)"**.
 Diferente dos demais tipos (disparados por ação), este vem de um **poll periódico
-via GET direto na Konsist** (não webhook) — a API da clínica é instável, então em
-vez de tempo real, o n8n reconcilia a agenda a cada ~1h e só posta um evento
-quando a `situacao` observada de uma consulta **muda** desde o poll anterior
-(nunca 1 linha por hora por consulta parada no mesmo estado).
+na Konsist** (não webhook) — a API da clínica é instável, então em vez de tempo
+real, o n8n reconcilia a agenda a cada ~1h e só posta um evento quando a
+`situacao` observada de uma consulta **muda** desde o poll anterior (nunca 1
+linha por hora por consulta parada no mesmo estado). O estado anterior fica na
+Data Table `Otogama Agenda Estado` (`chave` → última `situacao` postada).
 
 `payload.situacao`: `"Agendado"` | `"Confirmado"` | `"Realizado"` | `"Faltou"` | `"Cancelado"`.
 `chave` é o id do agendamento na Konsist — mesmo espaço de chave usado em
 `envio_lembrete`/`confirmacao`/`agendamento_ia` quando aplicável, o que permite
 cruzar "recebeu lembrete" e "foi criado pela IA" com o desfecho real.
+
+**Origem dos dados:** `POST https://otogama.konsistapi.com.br/agendamentos` com
+`{ "datai": "YYYY-MM-DD", "dataf": "YYYY-MM-DD" }`. A API recusa (HTTP 400
+`Intervalo máximo de 7 dias`) qualquer intervalo maior que 7 dias, então cada
+rodada faz **três** chamadas: `-13..-7`, `-6..hoje` e `+1..+7`. Isso cobre 21
+dias — o passado para pegar desfecho que a clínica fecha com atraso, o futuro
+para alimentar "Pendentes" e o filtro Amanhã.
+
+**Tradução do `agendamento_status` da Konsist** (código de uma letra, verificado
+em produção sobre 244 consultas de uma semana já encerrada):
+
+| Konsist | `situacao` | Observado |
+| --- | --- | --- |
+| `M` | `Realizado` | 163 (67%) |
+| `F` | `Faltou` | 42 (17%) |
+| `D` | `Cancelado` | 38 (16%) |
+| `N` | `Agendado` | só em consulta ainda não encerrada |
+| `C` | `Confirmado` | só em consulta ainda não encerrada |
+| `A`, `B`, `E` | — | estado transitório do dia; **não vira evento** |
+
+`F` (faltou) é de fato distinto de `D` (desmarcado) — era a dúvida que travava a
+métrica de no-show, e a checagem em produção confirmou que a taxa de falta não
+fica contaminada por cancelamento legítimo. `A`/`B`/`E` aparecem só em datas
+recentes e somem quando o dia fecha; o poll os ignora de propósito, e a consulta
+mantém a última `situacao` conhecida até cair num dos cinco estados finais.
+
+**`ts` é a data/hora da consulta, não a do poll.** Assim "Taxa de falta por dia"
+mostra o dia em que o paciente faltou, não o dia em que o robô percebeu. Para não
+colidir com o índice único `(tenant_id, tipo, chave, ts)` a cada transição, os
+**segundos carregam um contador de transições** daquela consulta (`versao` na
+Data Table): a primeira observação vai com `:00`, a mudança seguinte com `:01`, e
+assim por diante. Uma consulta que vai de `Agendado` a `Realizado` gera duas
+linhas no mesmo minuto, com segundos diferentes, e o `DISTINCT ON (chave) ORDER
+BY ts DESC` do dashboard fica com a última.
+
+Contador, e não uma ordem fixa por situação, porque consulta volta atrás: quem é
+desmarcado e remarcado passa duas vezes por `Confirmado`. Com ordem fixa o
+segundo `Confirmado` teria o mesmo `ts` do primeiro, o banco o descartaria como
+duplicado e a tela continuaria mostrando `Cancelado` para sempre. O contador dá a
+volta em 60 — 60 mudanças de estado na mesma consulta não acontece na prática.
 
 ```bash
 curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{
@@ -171,10 +213,10 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
 }'
 ```
 
-**Importante para quem for implementar o poll:** `Faltou` precisa ser um status
-**distinto** de `Cancelado` na Konsist — se os dois caírem no mesmo status
-genérico de "cancelado", a métrica de no-show no dashboard fica contaminada por
-cancelamentos legítimos. Confirmar esse detalhe antes de ligar o poll em produção.
+Como `ts` fica na data da consulta e as janelas incluem 7 dias à frente,
+consultas futuras entram nos recortes de 7/30/90 dias como **pendentes** — é
+intencional: "na janela olhada, tantas ainda sem desfecho". As taxas de falta e
+de comparecimento não são afetadas, porque só contam `Realizado` e `Faltou`.
 
 ### 7. `api_status` — monitor de uptime (só em transição de estado)
 
