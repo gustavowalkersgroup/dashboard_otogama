@@ -13,6 +13,7 @@ const ORIGEM: Record<string, string> = {
   fluxo_confirmacao: "fluxo de confirmação",
   fluxo_perdida: "aviso de falta",
   botao_ajuda_painel: "botão do painel",
+  reenvio_manual: "reenvio manual",
 };
 
 function bateBusca(busca: string, ...campos: (string | null)[]): boolean {

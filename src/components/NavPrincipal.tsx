@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
+// `periodo: false` para a tela que não se recorta por período: Lembretes fala de
+// um dia de agenda (?d=), então carregar o ?p= para lá só sujaria a URL.
 const ITENS = [
-  { href: "/", rotulo: "Visão geral" },
-  { href: "/confirmacoes", rotulo: "Confirmações" },
-  { href: "/agendamentos", rotulo: "Agendamentos IA" },
-  { href: "/agenda", rotulo: "Agenda" },
-  { href: "/saude", rotulo: "Saúde da API" },
+  { href: "/", rotulo: "Visão geral", periodo: true },
+  { href: "/confirmacoes", rotulo: "Confirmações", periodo: true },
+  { href: "/agendamentos", rotulo: "Agendamentos IA", periodo: true },
+  { href: "/agenda", rotulo: "Agenda", periodo: true },
+  { href: "/lembretes", rotulo: "Lembretes", periodo: false },
+  { href: "/saude", rotulo: "Saúde da API", periodo: true },
 ];
 
 export default function NavPrincipal() {
@@ -24,7 +27,7 @@ export default function NavPrincipal() {
         return (
           <Link
             key={item.href}
-            href={`${item.href}${sufixo}`}
+            href={`${item.href}${item.periodo ? sufixo : ""}`}
             className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
               ativo
                 ? "border-tinta text-tinta"

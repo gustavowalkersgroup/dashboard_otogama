@@ -3,6 +3,7 @@ import { sql, TENANT } from "@/lib/db";
 import {
   type DiaRelativo,
   ROTULO_DIA,
+  dataBRDiaRelativo,
   inicioPeriodo,
   isoDiaRelativo,
   janelaDia,
@@ -788,4 +789,122 @@ export async function comparecimentoIaVsHumano(dias: Periodo): Promise<Compareci
       total: n(l?.total),
     };
   });
+}
+
+// -------------------------------------------------- lembretes que faltaram
+//
+// Existe porque a Konsist cai. Quando ela não responde às 08:00, o workflow D-1
+// não recebe lista nenhuma e nenhum lembrete sai — e, pior, não sobra registro
+// de QUEM deveria ter recebido, porque a lista é que faltou.
+//
+// O poll da agenda resolve isso de lado: ele varre os próximos 7 dias de hora em
+// hora, então a última leitura bem-sucedida deixou no banco quem tem consulta
+// amanhã. Cruzando isso com `envio_lembrete` sai exatamente a lista de quem
+// ficou sem aviso.
+//
+// Esta lista é um palpite bem informado, não a verdade final: ela vale até a
+// última leitura que a Konsist deixou passar. Quem valida é o n8n no reenvio —
+// ele relê a agenda na hora e ignora chave que não se encaixa mais (cancelada no
+// meio da queda, por exemplo).
+
+export const DIAS_LEMBRETE = ["hoje", "amanha"] as const;
+export type DiaLembrete = (typeof DIAS_LEMBRETE)[number];
+
+export function diaLembreteValido(d: string | undefined): DiaLembrete {
+  return (DIAS_LEMBRETE as readonly string[]).includes(d ?? "") ? (d as DiaLembrete) : "amanha";
+}
+
+export type ConsultaDoDia = {
+  chave: string;
+  paciente: string | null;
+  telefone: string | null;
+  medico: string | null;
+  especialidade: string | null;
+  servico: string | null;
+  situacao: string;
+  horaConsulta: string | null;
+  /** quando o poll observou esta situação — dá para julgar se a lista está velha */
+  vistoEm: string | null;
+};
+
+export type PainelLembretes = {
+  dia: DiaLembrete;
+  /** DD/MM/YYYY — o mesmo formato que vai para o n8n no reenvio */
+  dataBR: string;
+  /** consultas em aberto (Agendado/Confirmado) que já têm envio_lembrete */
+  avisadas: number;
+  /** consultas em aberto ainda sem nenhum envio_lembrete */
+  faltando: ConsultaDoDia[];
+  /** canceladas no dia — não entram no reenvio, ficam aqui só como contexto */
+  canceladas: number;
+  /** já encerradas (Realizado/Faltou) — lembrete não faz mais sentido */
+  encerradas: number;
+  /** observação mais recente que o poll gravou para este dia; null = poll nunca viu */
+  agendaVistaEm: string | null;
+};
+
+export async function painelLembretes(dia: DiaLembrete): Promise<PainelLembretes> {
+  const dataBR = dataBRDiaRelativo(dia);
+  const linhas = await sql()`
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave)
+        chave, paciente, telefone,
+        payload->>'situacao' AS situacao,
+        payload->>'medico' AS medico,
+        payload->>'especialidade' AS especialidade,
+        payload->>'servico' AS servico,
+        payload->>'hora_consulta' AS hora_consulta,
+        payload->>'visto_em' AS visto_em
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
+        AND chave IS NOT NULL AND payload->>'data_consulta' = ${dataBR}
+      ORDER BY chave, ts DESC
+    )
+    SELECT u.*,
+      EXISTS (
+        SELECT 1 FROM eventos l
+        WHERE l.tenant_id = ${TENANT} AND l.tipo = 'envio_lembrete' AND l.chave = u.chave
+      ) AS avisada
+    FROM ultimos u
+    ORDER BY u.hora_consulta NULLS LAST, u.paciente NULLS LAST
+  `;
+
+  const EM_ABERTO = new Set(["Agendado", "Confirmado"]);
+  let avisadas = 0;
+  let canceladas = 0;
+  let encerradas = 0;
+  let agendaVistaEm: string | null = null;
+  const faltando: ConsultaDoDia[] = [];
+
+  for (const l of linhas) {
+    const situacao = String(l.situacao ?? "");
+    const vistoEm = (l.visto_em as string) ?? null;
+    if (vistoEm && (agendaVistaEm === null || vistoEm > agendaVistaEm)) agendaVistaEm = vistoEm;
+
+    if (situacao === "Cancelado") {
+      canceladas += 1;
+      continue;
+    }
+    if (!EM_ABERTO.has(situacao)) {
+      encerradas += 1;
+      continue;
+    }
+    if (l.avisada) {
+      avisadas += 1;
+      continue;
+    }
+    faltando.push({
+      chave: String(l.chave),
+      paciente: (l.paciente as string) ?? null,
+      telefone: (l.telefone as string) ?? null,
+      medico: (l.medico as string) ?? null,
+      especialidade: (l.especialidade as string) ?? null,
+      servico: (l.servico as string) ?? null,
+      situacao,
+      horaConsulta: (l.hora_consulta as string) ?? null,
+      vistoEm,
+    });
+  }
+
+  return { dia, dataBR, avisadas, faltando, canceladas, encerradas, agendaVistaEm };
 }
