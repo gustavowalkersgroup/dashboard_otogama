@@ -90,10 +90,16 @@ Manter os dois separados importa porque eles pedem ações opostas: `sem_pacient
 resolve sozinho e olhar seria desperdício. Até 25/08/2026 os dois chegavam como
 `sem_paciente`, e a tela contava queda de API como paciente não localizado.
 
+Quando a fila desiste, o resultado final é `"falha_definitiva"`: ninguém mais vai
+tentar, o paciente acha que confirmou, e alguém precisa gravar na mão no sistema
+da clínica. É o único desfecho desta tela que exige ação humana obrigatória — o
+`Monitor API Konsist` alerta no Discord quando acontece.
+
 Os desfechos na tela são contados pelo **último resultado de cada chave**, não
-por evento: quando a fila drena e o n8n posta um `ok` para a mesma chave, ela sai
-sozinha da coluna de presas. Para isso funcionar, o reprocessamento precisa postar
-o `confirmacao` de novo com o resultado final.
+por evento: quando a fila drena, o `Monitor API Konsist` posta o `confirmacao` de
+novo com `payload.origem = "fila_reprocessada"` e o resultado final (`ok`,
+`ja_confirmado` ou `falha_definitiva`), e a chave sai sozinha da coluna de presas.
+O payload desse reprocessamento também traz `tentativas` e `http`.
 
 ```bash
 curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{

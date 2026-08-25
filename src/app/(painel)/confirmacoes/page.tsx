@@ -54,7 +54,7 @@ export default async function Confirmacoes({
         <FiltroPeriodo dias={dias} />
       </div>
 
-      <div className="mt-4 grid grid-cols-4 gap-3">
+      <div className="mt-4 grid grid-cols-5 gap-3">
         <CardMetrica
           rotulo="Confirmadas na Konsist"
           valor={numeroBR(contagem.ok)}
@@ -70,6 +70,12 @@ export default async function Confirmacoes({
           valor={numeroBR(contagem.erroApi)}
           detalhe="na fila do n8n, retentando"
           className={contagem.erroApi > 0 ? "border-alerta/50 bg-alerta/5" : ""}
+        />
+        <CardMetrica
+          rotulo="Confirmações perdidas"
+          valor={numeroBR(contagem.falhaDefinitiva)}
+          detalhe="a fila desistiu · gravar na mão"
+          className={contagem.falhaDefinitiva > 0 ? "border-critico/40 bg-critico/5" : ""}
         />
         <CardMetrica
           rotulo="Paciente não localizado"

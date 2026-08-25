@@ -35,9 +35,20 @@ export default function TabelaConfirmacoes({
 }) {
   const [busca, setBusca] = useState("");
 
-  const presasF = useMemo(
+  const travadas = useMemo(
     () => presasApi.filter((p) => bateBusca(busca, p.paciente, p.telefone, p.chave)),
     [presasApi, busca],
+  );
+  // A fila desistiu: ninguém mais vai tentar. Precisa vir antes e mais forte que
+  // as que ainda estão sendo retentadas — são as duas únicas linhas desta tela
+  // onde o paciente acha que confirmou e a clínica não tem o registro.
+  const perdidasF = useMemo(
+    () => travadas.filter((p) => p.resultado === "falha_definitiva"),
+    [travadas],
+  );
+  const presasF = useMemo(
+    () => travadas.filter((p) => p.resultado === "erro_api"),
+    [travadas],
   );
   const ajudaF = useMemo(
     () => ajuda.filter((a) => bateBusca(busca, a.paciente, a.telefone, a.chave)),
@@ -64,6 +75,49 @@ export default function TabelaConfirmacoes({
         />
         <ToggleTelefones />
       </div>
+
+      {perdidasF.length > 0 && (
+        <section className="mt-4 rounded-2xl border border-critico/40 bg-critico/5 p-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <span className="text-critico" aria-hidden>
+              ▲
+            </span>
+            Confirmação perdida — gravar na mão na Konsist
+          </h2>
+          <p className="mt-0.5 text-xs text-tinta-3">
+            O paciente confirmou pelo WhatsApp, a Konsist não registrou, e a fila do n8n desistiu
+            depois de 5 tentativas. Ninguém mais vai tentar: sem alguém gravar no sistema da
+            clínica, esta consulta consta como não confirmada e o paciente acha que está tudo
+            certo.
+          </p>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[620px] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-tinta-3">
+                  <th className="py-1.5 pr-3 font-medium">Paciente</th>
+                  <th className="py-1.5 pr-3 font-medium">Telefone</th>
+                  <th className="py-1.5 pr-3 font-medium">Agendamento</th>
+                  <th className="py-1.5 pr-3 font-medium">Tentativas</th>
+                  <th className="py-1.5 font-medium">Quando confirmou</th>
+                </tr>
+              </thead>
+              <tbody>
+                {perdidasF.map((p) => (
+                  <tr key={p.chave} className="border-t border-grade">
+                    <td className="py-2 pr-3 font-medium">{p.paciente ?? "—"}</td>
+                    <td className="py-2 pr-3">
+                      <Telefone numero={p.telefone} />
+                    </td>
+                    <td className="py-2 pr-3 tabular-nums">{p.chave}</td>
+                    <td className="py-2 pr-3 tabular-nums">{p.tentativas ?? "—"}</td>
+                    <td className="py-2 tabular-nums">{dataHoraBRT(p.ts)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {presasF.length > 0 && (
         <section className="mt-4 rounded-2xl border border-alerta/50 bg-alerta/5 p-4">
