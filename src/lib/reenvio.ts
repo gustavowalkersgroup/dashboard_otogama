@@ -45,7 +45,15 @@ export async function pedirReenvio(
   try {
     resp = await fetch(c.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": c.token },
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": c.token,
+        // User-Agent explícito porque o `fetch` de uma função serverless não manda
+        // um, e filtro de bot no caminho (o "Ignore Bots" do webhook do n8n, por
+        // exemplo) descarta requisição sem UA antes de qualquer código rodar — 403
+        // sem corpo, indistinguível de token errado.
+        "User-Agent": "otogama-dashboard/1.0 (+https://github.com/gustavowalkersgroup/dashboard_otogama)",
+      },
       body: JSON.stringify({ ...pedido, origem: "dashboard" }),
       signal: AbortSignal.timeout(TEMPO_LIMITE_MS),
       cache: "no-store",
@@ -82,14 +90,19 @@ export async function pedirReenvio(
             : ".");
       }
     } catch {
-      // n8n pode responder texto puro quando a recusa vem antes do workflow
+      // Recusa antes do workflow (filtro de bot, proxy, auth do próprio webhook)
+      // responde texto puro. Mostrar esse texto é o que diferencia "token errado"
+      // de "a requisição nem chegou no workflow" — ficamos uma tarde cegos por
+      // tratar os dois casos com a mesma frase.
+      const cru = texto.replace(/\s+/g, " ").trim().slice(0, 200);
+      if (cru) detalhe = ` O n8n respondeu: "${cru}"`;
     }
     return {
       ok: false,
       status: 502,
       erro:
-        "O n8n recusou o token: o N8N_REENVIO_TOKEN deste deployment não é o mesmo que o" +
-        " workflow de reenvio espera." +
+        `O n8n recusou a chamada (HTTP ${resp.status}). Se for o token, o` +
+        " N8N_REENVIO_TOKEN deste deployment não é o mesmo que o workflow espera." +
         detalhe,
     };
   }
