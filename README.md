@@ -12,10 +12,16 @@ confirmações de pacientes, trabalho poupado da equipe e saúde da API da clín
 ```
 fontes (n8n / NexTags) ──POST /api/eventos (x-api-key)──▶ Next.js na Vercel ──▶ Neon Postgres
                                                           /  (dashboard, senha + cookie)
+                                                          \
+                        n8n ◀──POST webhook (x-api-key)──  ações do painel
 ```
 
-- O dashboard **só consome** o próprio banco. Ele **nunca** chama a API da clínica
-  (Konsist) no request path — dados chegam por sincronização assíncrona via n8n.
+- Para **ler**, o dashboard só consome o próprio banco. Ele **nunca** chama a API da
+  clínica (Konsist) no request path — dados chegam por sincronização assíncrona via n8n.
+- Para **agir** (hoje: reenviar lembrete), ele chama um webhook do **n8n** e nada mais.
+  Quem fala com Konsist e NexTags é sempre o n8n, que já tem as credenciais, os
+  `flow_id` e o template da mensagem. É isso que garante que o lembrete reenviado à
+  mão seja idêntico ao que o disparo automático mandaria.
 - Tabela única `eventos` (event store append-only) com `tenant_id` em tudo desde o
   dia 1 (valor fixo `otogama` no v1) para viabilizar multi-tenant depois.
 - Timezone: armazenamos UTC (`timestamptz`), exibimos em horário de Brasília.
@@ -48,6 +54,7 @@ cp .env.example .env.local
 | `DASHBOARD_PASSWORD` | senha única de acesso ao dashboard |
 | `INGEST_API_KEY` | chave do header `x-api-key` da ingestão |
 | `SESSION_SECRET` | assina o cookie de sessão (≥ 32 chars aleatórios) |
+| `N8N_REENVIO_URL` | webhook do n8n que executa o reenvio manual de lembrete |
 
 Gere segredos fortes e **distintos** para cada uma:
 
@@ -57,6 +64,13 @@ openssl rand -base64 32
 
 As opcionais (rate limit, horas até "pendente", minutos da métrica de trabalho
 poupado) estão documentadas no `.env.example`.
+
+`N8N_REENVIO_URL` é a única variável nova da tela Lembretes: o segredo do webhook
+é, por padrão, o próprio `INGEST_API_KEY` — o n8n já guarda esse valor na credencial
+que usa para postar em `/api/eventos`, e o webhook de reenvio reutiliza a mesma. Para
+separar as duas capacidades, aponte o webhook para uma credencial dedicada no n8n e
+defina `N8N_REENVIO_TOKEN` com o mesmo valor aqui. Sem `N8N_REENVIO_URL` o dashboard
+sobe normal: só o botão de reenviar responde 500 dizendo o que falta.
 
 ### 3. Rodar local
 

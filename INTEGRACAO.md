@@ -277,6 +277,66 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
 }'
 ```
 
+## Sentido inverso: o dashboard chamando o n8n
+
+Tudo acima é o n8n **alimentando** o dashboard. A tela **Lembretes** é a primeira
+que anda no sentido contrário: ela dispara uma ação.
+
+O caso que a motivou: a Konsist devolveu HTTP 502 nos dois disparos do D-1
+(08:13 e 08:26 do dia 25/08/2026), o workflow não recebeu lista nenhuma e
+**nenhum lembrete saiu** — e não sobrou registro de quem deveria ter recebido,
+porque foi a lista que faltou. O poll da agenda (§6) cobre esse buraco de lado:
+ele varre os próximos 7 dias de hora em hora, então a última leitura que passou
+deixou no banco quem tem consulta amanhã. Cruzando com `envio_lembrete` sai
+exatamente quem ficou sem aviso.
+
+**Quem faz o quê.** O dashboard sabe *quem* falta; o n8n sabe *como* mandar. O
+dashboard não fala com Konsist nem com NexTags — ele posta a lista de chaves num
+webhook do n8n, e o n8n relê a agenda, monta a mensagem com os 24 campos do
+template e dispara. É o que garante que o lembrete reenviado à mão seja idêntico
+ao do disparo automático.
+
+**Contrato** (`POST` no webhook, header `x-api-key`):
+
+```json
+{ "data": "26/08/2026", "chaves": ["574256", "575832"], "origem": "dashboard" }
+```
+
+Resposta imediata, antes de qualquer trabalho:
+
+```json
+{ "aceito": true, "total": 2, "erro": null }
+```
+
+O webhook responde na hora e só depois trabalha — de propósito. Uma chamada à
+Konsist leva ~25s só para falhar, e prender a conexão HTTP do dashboard nisso
+transformaria "a Konsist está fora" em "o dashboard travou".
+
+**O que o n8n recusa,** mesmo que o dashboard peça:
+
+- `data` que não seja hoje nem amanhã. O texto da mensagem é escolhido pelo campo
+  `lembrete_dia` (`d0`/`d1`), então reenviar para depois de amanhã diria ao
+  paciente um dia errado.
+- chave que não esteja mais em aberto na agenda. Se a consulta foi cancelada
+  durante a queda, ela sai da lista relida e não recebe nada.
+- chave que não veio no pedido, ou fora do formato numérico.
+- mais de 300 chaves por pedido.
+
+Do outro lado, o `/api/acoes/reenviar-lembretes` reconfere as chaves contra a
+lista que ele mesmo calcula antes de repassar: sessão válida não basta para
+escolher para quem mandar WhatsApp.
+
+**Rastro.** Cada mensagem reenviada volta como um `envio_lembrete` normal com
+`payload.origem = "reenvio_manual"` e `payload.lembrete_dia`, então o reenvio
+aparece nas métricas em vez de virar um envio invisível. Se a Konsist estiver
+fora, nada é enviado e o alerta cai no Discord.
+
+**Limite conhecido:** o reenvio não escreve nas Data Tables de dedup
+(`Otogama Lembrete Consulta Dedup` / `Otogama Lembrete D0 Dedup`). Não causa
+mensagem repetida — quando alguém reenvia, a janela do D-0/D-1 daquele dia já
+passou — mas dois cliques em sequência, antes de o `envio_lembrete` ser gravado,
+mandariam duas vezes. A confirmação na tela existe para isso.
+
 ## Testes de sanidade
 
 ```bash

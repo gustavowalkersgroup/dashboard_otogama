@@ -62,6 +62,12 @@ export function isoDiaRelativo(dia: DiaRelativo): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: FUSO }).format(d);
 }
 
+/** DD/MM/YYYY do dia BRT — formato em que `payload.data_consulta` é gravado. */
+export function dataBRDiaRelativo(dia: DiaRelativo): string {
+  const [ano, mes, d] = isoDiaRelativo(dia).split("-");
+  return `${d}/${mes}/${ano}`;
+}
+
 /** Janela [início, fim) do dia BRT em UTC — para o que se recorta por data do evento. */
 export function janelaDia(dia: DiaRelativo): { inicio: Date; fim: Date } {
   const inicio = new Date(`${isoDiaRelativo(dia)}T00:00:00-03:00`);
