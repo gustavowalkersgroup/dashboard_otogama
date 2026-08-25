@@ -60,11 +60,38 @@ export async function pedirReenvio(
   if (!resp.ok) {
     const texto = await resp.text().catch(() => "");
     console.error(`reenvio: n8n devolveu ${resp.status}: ${texto.slice(0, 300)}`);
-    const erro =
-      resp.status === 401 || resp.status === 403
-        ? "O n8n recusou o token: o N8N_REENVIO_TOKEN deste deployment não é o mesmo que o workflow de reenvio espera."
-        : `O n8n devolveu ${resp.status}.`;
-    return { ok: false, status: 502, erro };
+    if (resp.status !== 401 && resp.status !== 403) {
+      return { ok: false, status: 502, erro: `O n8n devolveu ${resp.status}.` };
+    }
+    // O webhook devolve tamanho e impressão do que recebeu (nunca o valor). Repassar
+    // isso transforma "não bateu" em "chegou com 39 caracteres e o esperado tem 40",
+    // que é acionável sem ninguém precisar saber o segredo.
+    let detalhe = "";
+    try {
+      const corpo = JSON.parse(texto) as {
+        recebido_tamanho?: number;
+        recebido_impressao?: string | null;
+        esperado_tamanho?: number;
+      };
+      if (typeof corpo.recebido_tamanho === "number") {
+        detalhe =
+          ` O webhook recebeu ${corpo.recebido_tamanho} caracteres` +
+          (corpo.recebido_impressao ? ` (impressão ${corpo.recebido_impressao})` : "") +
+          (typeof corpo.esperado_tamanho === "number"
+            ? ` e espera ${corpo.esperado_tamanho}.`
+            : ".");
+      }
+    } catch {
+      // n8n pode responder texto puro quando a recusa vem antes do workflow
+    }
+    return {
+      ok: false,
+      status: 502,
+      erro:
+        "O n8n recusou o token: o N8N_REENVIO_TOKEN deste deployment não é o mesmo que o" +
+        " workflow de reenvio espera." +
+        detalhe,
+    };
   }
 
   const corpo = (await resp.json().catch(() => null)) as RespostaReenvio | null;

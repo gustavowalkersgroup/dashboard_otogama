@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { COOKIE_SESSAO, validarTokenSessao } from "@/lib/sessao";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,16 +10,23 @@ export const dynamic = "force-dynamic";
 // vars no build — quando o login para de aceitar a senha, não há como saber de
 // fora se o valor está errado, vazio, ou se o deployment é anterior à mudança.
 //
-// Protegido pela INGEST_API_KEY (a mesma da ingestão): não dá para exigir
-// sessão, já que quem precisa disto é justamente quem não consegue entrar.
+// Aceita sessão OU a INGEST_API_KEY. A chave existe porque quem está trancado
+// fora do login precisa deste endpoint justamente por não ter sessão. A sessão
+// existe porque quem CONSEGUE entrar não deveria precisar decorar segredo nenhum
+// para conferir a configuração — basta abrir a URL no navegador já logado.
 
-function autorizado(recebida: string | null): boolean {
+function chaveConfere(recebida: string | null): boolean {
   const env: Record<string, string | undefined> = process.env;
   const esperada = (env.INGEST_API_KEY ?? "").trim();
   if (!esperada || !recebida) return false;
   const a = createHash("sha256").update(recebida.trim()).digest();
   const b = createHash("sha256").update(esperada).digest();
   return timingSafeEqual(a, b);
+}
+
+async function autorizado(req: NextRequest): Promise<boolean> {
+  if (chaveConfere(req.headers.get("x-api-key"))) return true;
+  return validarTokenSessao(req.cookies.get(COOKIE_SESSAO)?.value);
 }
 
 /** Primeiros 8 hex do sha256 — permite conferir se o valor é o esperado sem expô-lo. */
@@ -40,8 +48,11 @@ function descrever(bruto: string | undefined) {
 }
 
 export async function GET(req: NextRequest) {
-  if (!autorizado(req.headers.get("x-api-key"))) {
-    return NextResponse.json({ erro: "api key inválida ou ausente" }, { status: 401 });
+  if (!(await autorizado(req))) {
+    return NextResponse.json(
+      { erro: "entre no dashboard, ou mande a INGEST_API_KEY no header x-api-key" },
+      { status: 401 },
+    );
   }
   const env: Record<string, string | undefined> = process.env;
 

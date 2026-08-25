@@ -81,6 +81,29 @@ portanto invisível na saída e fatal na entrada — e o valor de uma credencial
 ser lido nem corrigido pela API do n8n. Daí o token dedicado, comparado dentro do
 workflow com `trim()` dos dois lados.
 
+### 2.1 Conferir a configuração sem decorar segredo
+
+`GET /api/login/diagnostico` diz o que **este deployment** enxerga em cada variável:
+`configurada`, `tamanho`, `tinhaEspacoSobrando` e `impressao` (8 primeiros hex do
+`sha256`). Nunca devolve valor nenhum.
+
+Aceita **sessão** ou a `INGEST_API_KEY` no header `x-api-key`. Estando logado no
+dashboard, basta abrir a URL no navegador — a chave existe só para o caso de estar
+trancado fora do login, que é justamente quando não há sessão.
+
+Impressões esperadas, para conferir sem precisar dos valores:
+
+| Variável | Impressão esperada | Onde mais o valor vive |
+|---|---|---|
+| `N8N_REENVIO_TOKEN` | `b67aea35` | dentro do node `Validar Pedido` do workflow de reenvio |
+| `INGEST_API_KEY` | — | credencial `Nextags Otogama` no n8n |
+| `DASHBOARD_PASSWORD` | — | em nenhum outro lugar |
+| `SESSION_SECRET` | — | em nenhum outro lugar |
+
+Impressão de token aleatório longo pode ser publicada aqui sem risco: 8 hex de
+`sha256` não voltam a um segredo de 40 caracteres sorteados. **Senha, não** — por isso
+`DASHBOARD_PASSWORD` fica de fora desta tabela, ainda que o endpoint reporte a dela.
+
 ### 3. Rodar local
 
 ```bash
