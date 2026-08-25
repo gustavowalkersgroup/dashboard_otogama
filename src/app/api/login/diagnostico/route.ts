@@ -44,11 +44,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ erro: "api key inválida ou ausente" }, { status: 401 });
   }
   const env: Record<string, string | undefined> = process.env;
+
+  // O reenvio manda `x-api-key` para o webhook do n8n, e o valor tem precedência:
+  // N8N_REENVIO_TOKEN ganha do INGEST_API_KEY. Um 401 vindo do n8n normalmente é
+  // isto — uma N8N_REENVIO_TOKEN configurada por engano assume a vez e não bate
+  // com a credencial do webhook. `origem` diz qual das duas está sendo usada.
+  const tokenDedicado = (env.N8N_REENVIO_TOKEN ?? "").trim();
+  const chaveIngestao = (env.INGEST_API_KEY ?? "").trim();
+  const emUso = tokenDedicado || chaveIngestao;
+
   return NextResponse.json({
     commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
     DASHBOARD_PASSWORD: descrever(env.DASHBOARD_PASSWORD),
     SESSION_SECRET: descrever(env.SESSION_SECRET),
     INGEST_API_KEY: descrever(env.INGEST_API_KEY),
     DATABASE_URL: { configurada: (env.DATABASE_URL ?? "").trim().length > 0 },
+    // URL não é segredo — mostrar de cara pega erro de digitação e webhook-test
+    N8N_REENVIO_URL: (env.N8N_REENVIO_URL ?? "").trim() || null,
+    N8N_REENVIO_TOKEN: descrever(env.N8N_REENVIO_TOKEN),
+    reenvioTokenEmUso: {
+      origem: tokenDedicado ? "N8N_REENVIO_TOKEN" : chaveIngestao ? "INGEST_API_KEY" : null,
+      impressao: emUso.length > 0 ? impressao(emUso) : null,
+    },
   });
 }
