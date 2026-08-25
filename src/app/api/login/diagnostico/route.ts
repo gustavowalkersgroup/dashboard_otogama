@@ -44,11 +44,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ erro: "api key inválida ou ausente" }, { status: 401 });
   }
   const env: Record<string, string | undefined> = process.env;
+
+  // O reenvio manda o N8N_REENVIO_TOKEN no header `x-api-key` do webhook. A
+  // impressão permite conferir contra o token que o workflow guarda sem revelar
+  // nenhum dos dois.
+  const tokenDedicado = (env.N8N_REENVIO_TOKEN ?? "").trim();
+
   return NextResponse.json({
     commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
     DASHBOARD_PASSWORD: descrever(env.DASHBOARD_PASSWORD),
     SESSION_SECRET: descrever(env.SESSION_SECRET),
     INGEST_API_KEY: descrever(env.INGEST_API_KEY),
     DATABASE_URL: { configurada: (env.DATABASE_URL ?? "").trim().length > 0 },
+    // URL não é segredo — mostrar de cara pega erro de digitação e webhook-test
+    N8N_REENVIO_URL: (env.N8N_REENVIO_URL ?? "").trim() || null,
+    N8N_REENVIO_TOKEN: descrever(env.N8N_REENVIO_TOKEN),
+    reenvioPronto: tokenDedicado.length > 0 && (env.N8N_REENVIO_URL ?? "").trim().length > 0,
   });
 }

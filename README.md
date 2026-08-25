@@ -55,6 +55,7 @@ cp .env.example .env.local
 | `INGEST_API_KEY` | chave do header `x-api-key` da ingestão |
 | `SESSION_SECRET` | assina o cookie de sessão (≥ 32 chars aleatórios) |
 | `N8N_REENVIO_URL` | webhook do n8n que executa o reenvio manual de lembrete |
+| `N8N_REENVIO_TOKEN` | token que o webhook de reenvio exige no header `x-api-key` |
 
 Gere segredos fortes e **distintos** para cada uma:
 
@@ -65,12 +66,20 @@ openssl rand -base64 32
 As opcionais (rate limit, horas até "pendente", minutos da métrica de trabalho
 poupado) estão documentadas no `.env.example`.
 
-`N8N_REENVIO_URL` é a única variável nova da tela Lembretes: o segredo do webhook
-é, por padrão, o próprio `INGEST_API_KEY` — o n8n já guarda esse valor na credencial
-que usa para postar em `/api/eventos`, e o webhook de reenvio reutiliza a mesma. Para
-separar as duas capacidades, aponte o webhook para uma credencial dedicada no n8n e
-defina `N8N_REENVIO_TOKEN` com o mesmo valor aqui. Sem `N8N_REENVIO_URL` o dashboard
-sobe normal: só o botão de reenviar responde 500 dizendo o que falta.
+As duas da tela Lembretes (`N8N_REENVIO_URL` e `N8N_REENVIO_TOKEN`) precisam bater
+com o workflow **"Otogama - Reenvio Manual de Lembretes"** no n8n, que guarda o token
+e o compara com `trim()` nos dois lados. Sem elas o dashboard sobe normal: só o botão
+de reenviar responde 500 dizendo qual variável falta.
+
+A primeira versão tentou economizar essa variável reutilizando o `INGEST_API_KEY` (o
+n8n já guarda o mesmo valor na credencial que usa para postar em `/api/eventos`), com
+o webhook autenticando pelo header auth do próprio n8n. Não funcionou, e a forma como
+não funcionou vale registro: o webhook devolvia `403 Authorization data is wrong!`
+enquanto a mesma credencial gravava eventos sem erro. A rota de ingestão apara o valor
+que recebe; a comparação do n8n não apara. Um espaço invisível no valor guardado é
+portanto invisível na saída e fatal na entrada — e o valor de uma credencial não pode
+ser lido nem corrigido pela API do n8n. Daí o token dedicado, comparado dentro do
+workflow com `trim()` dos dois lados.
 
 ### 3. Rodar local
 
