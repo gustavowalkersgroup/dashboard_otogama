@@ -45,13 +45,10 @@ export async function GET(req: NextRequest) {
   }
   const env: Record<string, string | undefined> = process.env;
 
-  // O reenvio manda `x-api-key` para o webhook do n8n, e o valor tem precedência:
-  // N8N_REENVIO_TOKEN ganha do INGEST_API_KEY. Um 401 vindo do n8n normalmente é
-  // isto — uma N8N_REENVIO_TOKEN configurada por engano assume a vez e não bate
-  // com a credencial do webhook. `origem` diz qual das duas está sendo usada.
+  // O reenvio manda o N8N_REENVIO_TOKEN no header `x-api-key` do webhook. A
+  // impressão permite conferir contra o token que o workflow guarda sem revelar
+  // nenhum dos dois.
   const tokenDedicado = (env.N8N_REENVIO_TOKEN ?? "").trim();
-  const chaveIngestao = (env.INGEST_API_KEY ?? "").trim();
-  const emUso = tokenDedicado || chaveIngestao;
 
   return NextResponse.json({
     commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
@@ -62,9 +59,6 @@ export async function GET(req: NextRequest) {
     // URL não é segredo — mostrar de cara pega erro de digitação e webhook-test
     N8N_REENVIO_URL: (env.N8N_REENVIO_URL ?? "").trim() || null,
     N8N_REENVIO_TOKEN: descrever(env.N8N_REENVIO_TOKEN),
-    reenvioTokenEmUso: {
-      origem: tokenDedicado ? "N8N_REENVIO_TOKEN" : chaveIngestao ? "INGEST_API_KEY" : null,
-      impressao: emUso.length > 0 ? impressao(emUso) : null,
-    },
+    reenvioPronto: tokenDedicado.length > 0 && (env.N8N_REENVIO_URL ?? "").trim().length > 0,
   });
 }

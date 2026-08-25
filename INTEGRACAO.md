@@ -296,6 +296,19 @@ webhook do n8n, e o n8n relê a agenda, monta a mensagem com os 24 campos do
 template e dispara. É o que garante que o lembrete reenviado à mão seja idêntico
 ao do disparo automático.
 
+**Autenticação.** O webhook não usa o header auth do n8n: ele compara o
+`x-api-key` recebido com um token guardado no próprio workflow, aparando os dois
+lados. A primeira versão reaproveitava a credencial `Nextags Otogama` (a mesma que
+o n8n usa para postar em `/api/eventos`) e devolvia `403 Authorization data is
+wrong!` enquanto aquela credencial gravava eventos normalmente — a rota de ingestão
+apara o valor recebido e a comparação do n8n não apara, então um espaço invisível no
+valor guardado passava batido na saída e barrava na entrada. Valor de credencial não
+é legível nem corrigível pela API do n8n, e o n8n resolve o próprio domínio para o
+loopback (não chama a própria URL), então nem medir dava. Token dedicado resolve as
+duas coisas: dá para comparar impressões pelos dois lados e o `trim()` fecha a classe
+de bug. O dashboard lê esse token de `N8N_REENVIO_TOKEN` — sem fallback, porque
+faltar variável tem que falhar dizendo o nome dela.
+
 **Contrato** (`POST` no webhook, header `x-api-key`):
 
 ```json
@@ -307,6 +320,9 @@ Resposta imediata, antes de qualquer trabalho:
 ```json
 { "aceito": true, "total": 2, "erro": null }
 ```
+
+Códigos: `200` aceito, `401` token errado ou ausente, `400` pedido malformado — data
+fora do formato, fora da janela hoje/amanhã, nenhuma chave válida, ou mais de 300.
 
 O webhook responde na hora e só depois trabalha — de propósito. Uma chamada à
 Konsist leva ~25s só para falhar, e prender a conexão HTTP do dashboard nisso

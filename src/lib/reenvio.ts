@@ -22,15 +22,13 @@ function config(): { url: string; token: string } | { problema: string } {
   // alias evita o inline de `process.env.X` do bundler
   const env: Record<string, string | undefined> = process.env;
   const url = (env.N8N_REENVIO_URL ?? "").trim();
-  // O webhook do n8n é protegido pela mesma credencial de header que o n8n já usa
-  // para postar em /api/eventos, então por padrão o segredo é o INGEST_API_KEY que
-  // este deployment já tem — uma variável nova a menos para configurar. Quem quiser
-  // separar as duas capacidades define N8N_REENVIO_TOKEN e troca a credencial no n8n.
-  const token = (env.N8N_REENVIO_TOKEN ?? env.INGEST_API_KEY ?? "").trim();
+  // Token dedicado, sem cair no INGEST_API_KEY se faltar. A primeira versão tinha
+  // esse fallback para poupar uma variável, e ele custou uma tarde: o webhook
+  // recusava com 403 e a mensagem de erro acusava o token, quando o valor enviado
+  // era o da ingestão. Faltar variável tem que falhar dizendo o nome dela.
+  const token = (env.N8N_REENVIO_TOKEN ?? "").trim();
   if (!url) return { problema: "N8N_REENVIO_URL ausente ou vazia neste deployment." };
-  if (!token) {
-    return { problema: "Nem N8N_REENVIO_TOKEN nem INGEST_API_KEY configuradas neste deployment." };
-  }
+  if (!token) return { problema: "N8N_REENVIO_TOKEN ausente ou vazia neste deployment." };
   return { url, token };
 }
 
@@ -64,7 +62,7 @@ export async function pedirReenvio(
     console.error(`reenvio: n8n devolveu ${resp.status}: ${texto.slice(0, 300)}`);
     const erro =
       resp.status === 401 || resp.status === 403
-        ? "O n8n recusou a chave (N8N_REENVIO_TOKEN não bate com o webhook)."
+        ? "O n8n recusou o token: o N8N_REENVIO_TOKEN deste deployment não é o mesmo que o workflow de reenvio espera."
         : `O n8n devolveu ${resp.status}.`;
     return { ok: false, status: 502, erro };
   }
