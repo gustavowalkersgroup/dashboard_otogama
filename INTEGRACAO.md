@@ -73,9 +73,27 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
 }'
 ```
 
-### 2. `confirmacao` — webhook de confirmação (3 desfechos)
+### 2. `confirmacao` — webhook de confirmação (4 desfechos)
 
-`payload.resultado`: `"ok"` (gravou na Konsist) | `"ja_confirmado"` | `"sem_paciente"` (falha).
+`payload.resultado`: `"ok"` (gravou na Konsist) | `"ja_confirmado"` | `"erro_api"` (a
+Konsist não respondeu) | `"sem_paciente"` (a chave não tem paciente correspondente).
+
+**`erro_api` é diferente de falha.** Quando a Konsist está fora, o paciente
+confirmou de verdade — o que faltou foi gravar. O n8n guarda essa confirmação
+numa fila (Data Table `Otogama Confirmacoes Pendentes`), o workflow *Monitor API
+Konsist* retenta a cada 15 minutos enquanto a API responde, e desiste depois de
+5 tentativas marcando `falha_definitiva`. O paciente recebe uma mensagem
+dizendo que a confirmação foi recebida e será sincronizada.
+
+Manter os dois separados importa porque eles pedem ações opostas: `sem_paciente`
+é problema de cadastro e alguém precisa olhar a chave; `erro_api` normalmente se
+resolve sozinho e olhar seria desperdício. Até 25/08/2026 os dois chegavam como
+`sem_paciente`, e a tela contava queda de API como paciente não localizado.
+
+Os desfechos na tela são contados pelo **último resultado de cada chave**, não
+por evento: quando a fila drena e o n8n posta um `ok` para a mesma chave, ela sai
+sozinha da coluna de presas. Para isso funcionar, o reprocessamento precisa postar
+o `confirmacao` de novo com o resultado final.
 
 ```bash
 curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{

@@ -8,6 +8,7 @@ import {
   listaConfirmados,
   listaPedidosAjuda,
   listaPendentes,
+  listaPresasApi,
   PENDENTE_APOS_HORAS,
   periodoValido,
   rotuloPeriodo,
@@ -24,13 +25,14 @@ export default async function Confirmacoes({
 
   let dados;
   try {
-    const [contagem, confirmados, pendentes, ajuda] = await Promise.all([
+    const [contagem, confirmados, pendentes, ajuda, presasApi] = await Promise.all([
       contagemConfirmacoes(dias),
       listaConfirmados(dias),
       listaPendentes(dias),
       listaPedidosAjuda(dias),
+      listaPresasApi(dias),
     ]);
-    dados = { contagem, confirmados, pendentes, ajuda };
+    dados = { contagem, confirmados, pendentes, ajuda, presasApi };
   } catch (e) {
     console.error("confirmações:", e);
     return (
@@ -43,7 +45,7 @@ export default async function Confirmacoes({
     );
   }
 
-  const { contagem, confirmados, pendentes, ajuda } = dados;
+  const { contagem, confirmados, pendentes, ajuda, presasApi } = dados;
 
   return (
     <>
@@ -52,7 +54,7 @@ export default async function Confirmacoes({
         <FiltroPeriodo dias={dias} />
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-3">
+      <div className="mt-4 grid grid-cols-4 gap-3">
         <CardMetrica
           rotulo="Confirmadas na Konsist"
           valor={numeroBR(contagem.ok)}
@@ -64,9 +66,15 @@ export default async function Confirmacoes({
           detalhe="paciente confirmou de novo"
         />
         <CardMetrica
-          rotulo="Falhas de gravação"
+          rotulo="Presas por queda da API"
+          valor={numeroBR(contagem.erroApi)}
+          detalhe="na fila do n8n, retentando"
+          className={contagem.erroApi > 0 ? "border-alerta/50 bg-alerta/5" : ""}
+        />
+        <CardMetrica
+          rotulo="Paciente não localizado"
           valor={numeroBR(contagem.semPaciente)}
-          detalhe="paciente não localizado"
+          detalhe="chave sem paciente na Konsist"
         />
       </div>
 
@@ -76,7 +84,12 @@ export default async function Confirmacoes({
       </p>
 
       <div className="mt-2">
-        <TabelaConfirmacoes confirmados={confirmados} pendentes={pendentes} ajuda={ajuda} />
+        <TabelaConfirmacoes
+          confirmados={confirmados}
+          pendentes={pendentes}
+          ajuda={ajuda}
+          presasApi={presasApi}
+        />
       </div>
     </>
   );

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Badge from "@/components/Badge";
 import { Telefone, ToggleTelefones } from "@/components/telefones";
 import { dataHoraBRT, duracaoHumana } from "@/lib/formato";
-import type { Confirmado, PedidoAjuda, Pendente } from "@/lib/metricas";
+import type { Confirmado, PedidoAjuda, Pendente, PresaApi } from "@/lib/metricas";
 
 const ORIGEM: Record<string, string> = {
   d0: "lembrete do dia",
@@ -26,13 +26,19 @@ export default function TabelaConfirmacoes({
   confirmados,
   pendentes,
   ajuda,
+  presasApi,
 }: {
   confirmados: Confirmado[];
   pendentes: Pendente[];
   ajuda: PedidoAjuda[];
+  presasApi: PresaApi[];
 }) {
   const [busca, setBusca] = useState("");
 
+  const presasF = useMemo(
+    () => presasApi.filter((p) => bateBusca(busca, p.paciente, p.telefone, p.chave)),
+    [presasApi, busca],
+  );
   const ajudaF = useMemo(
     () => ajuda.filter((a) => bateBusca(busca, a.paciente, a.telefone, a.chave)),
     [ajuda, busca],
@@ -58,6 +64,46 @@ export default function TabelaConfirmacoes({
         />
         <ToggleTelefones />
       </div>
+
+      {presasF.length > 0 && (
+        <section className="mt-4 rounded-2xl border border-alerta/50 bg-alerta/5 p-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <span className="text-alerta" aria-hidden>
+              ⏳
+            </span>
+            Confirmaram, mas a Konsist estava fora
+          </h2>
+          <p className="mt-0.5 text-xs text-tinta-3">
+            O n8n guarda numa fila e retenta a cada 15min enquanto a API responde, desistindo
+            depois de 5 tentativas. Some daqui sozinho quando gravar. O que continuar aqui depois
+            de umas horas precisa ser confirmado na mão — o paciente já acha que confirmou.
+          </p>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-tinta-3">
+                  <th className="py-1.5 pr-3 font-medium">Paciente</th>
+                  <th className="py-1.5 pr-3 font-medium">Telefone</th>
+                  <th className="py-1.5 pr-3 font-medium">Agendamento</th>
+                  <th className="py-1.5 font-medium">Quando confirmou</th>
+                </tr>
+              </thead>
+              <tbody>
+                {presasF.map((p) => (
+                  <tr key={p.chave} className="border-t border-grade">
+                    <td className="py-2 pr-3 font-medium">{p.paciente ?? "—"}</td>
+                    <td className="py-2 pr-3">
+                      <Telefone numero={p.telefone} />
+                    </td>
+                    <td className="py-2 pr-3 tabular-nums">{p.chave}</td>
+                    <td className="py-2 tabular-nums">{dataHoraBRT(p.ts)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {ajudaF.length > 0 && (
         <section className="mt-4 rounded-2xl border border-critico/40 bg-critico/5 p-4">
