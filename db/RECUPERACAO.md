@@ -43,24 +43,51 @@ dentro do projeto compartilhado. Razões:
 - **Migrar custa zero agora**, e só agora: não há dado para mover. Adiar é
   escolher pagar depois um custo que hoje é gratuito.
 
+Um detalhe que muda o caminho: a organização do Neon é **gerenciada pela
+Vercel** (veio do Marketplace). A API do Neon recusa criar projeto ali —
+`404 action restricted; reason:"organization is managed by Vercel"`. Projeto
+novo se cria **pela Vercel**, em *Storage → Create Database → Neon*, e a
+integração injeta as variáveis no projeto sozinha. Pela API do Neon dá para
+criar database e role dentro de um projeto que já existe, mas não projeto.
+
 ## 3. Criar o projeto
 
-Console do Neon → **New project**:
+Painel da **Vercel** → *Storage* → **Create Database** → Neon → conectar ao
+projeto `dashboard_otogama`. Não pelo console do Neon: veja a restrição no fim
+da seção 2.
+
+Feito em 31/08/2026 — é este o banco do dashboard hoje:
 
 | campo | valor |
 | --- | --- |
-| nome | `otogama-dashboard` |
-| região | `aws-sa-east-1` (São Paulo — mesma do deployment) |
-| database | `otogama` |
-| role | `otogama_owner` |
-| history retention | o máximo que o plano permitir (24 h no Free) |
+| store (Vercel) | `otogama` |
+| projeto Neon | `dawn-union-72555580` |
+| região | `us-east-1` (`c-11`) |
+| host | `ep-tiny-rain-av6u7yub-pooler.c-11.us-east-1.aws.neon.tech` |
+| database | `neondb` |
+| role | `neondb_owner` |
+
+Nada mais divide este projeto com o dashboard. Duas coisas para conferir no
+console do Neon depois de criar:
+
+- **History retention** — subir para o máximo que o plano permitir (24 h no
+  Free). É o que decide se um acidente é reversível.
+- **Região vs. região das functions da Vercel.** O default da Vercel é `iad1`
+  (us-east-1), e aí `us-east-1` é a escolha certa — era o store antigo, em
+  `sa-east-1`, que estava do lado errado. Se as functions deste projeto
+  estiverem em `gru1`, vale recriar o store em `aws-sa-east-1`: cada query
+  atravessa o continente.
 
 ## 4. Trocar a `DATABASE_URL` na Vercel
 
-Copiar a connection string **pooled** (`-pooler` no host) do novo projeto e
-substituir a `DATABASE_URL` do projeto na Vercel — Production, Preview e
-Development. Depois **redeploy**: a Vercel só entrega variável nova para
-deployment novo.
+A integração da Vercel injeta `DATABASE_URL` (e `POSTGRES_*`, `PG*`) sozinha ao
+conectar o store. **Cuidado com a variável antiga:** se já existia uma
+`DATABASE_URL` posta à mão — era o caso aqui — a integração não sobrescreve, e o
+deployment continua apontando para o banco velho sem reclamar de nada. Apagar a
+manual e deixar a da integração, ou colar nela a connection string **pooled**
+(`-pooler` no host) do projeto novo.
+
+Depois, **redeploy**: a Vercel só entrega variável nova para deployment novo.
 
 Conferir para onde o deployment está apontando, já logado no dashboard:
 
@@ -84,6 +111,13 @@ chamar duas vezes é o mesmo que chamar uma. Responde
 
 Alternativa sem HTTP: colar `db/schema.sql` no SQL Editor do Neon, ou
 `npm run db:init` com a `DATABASE_URL` no ambiente.
+
+Se for aplicar o DDL por fora, **em sequência**: os quatro comandos dependem um
+do outro. No SQL over HTTP do Neon cada requisição é uma transação própria, e em
+31/08 mandar as quatro em paralelo (o nó HTTP do n8n dispara até 50 itens de uma
+vez) fez os três `CREATE INDEX` correrem na frente do `CREATE TABLE` e
+devolverem `42P01 relation "eventos" does not exist`. A rota `/api/eventos/init`
+não tem esse problema: ela roda um comando por vez, com `await`.
 
 ## 6. Confirmar
 
