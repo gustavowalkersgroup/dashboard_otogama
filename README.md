@@ -104,6 +104,12 @@ Impressão de token aleatório longo pode ser publicada aqui sem risco: 8 hex de
 `sha256` não voltam a um segredo de 40 caracteres sorteados. **Senha, não** — por isso
 `DASHBOARD_PASSWORD` fica de fora desta tabela, ainda que o endpoint reporte a dela.
 
+Para `DATABASE_URL` o endpoint devolve `host` e `banco`, sem usuário nem senha. Serve
+para responder "a qual projeto do Neon este deployment está apontando?", que não dá
+para descobrir de outro jeito depois que a variável é marcada como sensível na Vercel
+— e responde também a versão mais perigosa da pergunta, "produção e staging estão no
+mesmo banco?".
+
 ### 3. Rodar local
 
 ```bash

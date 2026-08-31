@@ -34,6 +34,25 @@ function impressao(v: string): string {
   return createHash("sha256").update(v).digest("hex").slice(0, 8);
 }
 
+/**
+ * Host e nome do banco da connection string — nunca usuário nem senha.
+ *
+ * Não é credencial: sem a senha ninguém se conecta, e o Neon exige auth. E é a
+ * única forma de saber a qual projeto do Neon este deployment aponta sem alguém
+ * abrir a connection string, que é justamente o que a Vercel não devolve depois
+ * de a variável ser marcada como sensível.
+ */
+function alvoBanco(bruto: string | undefined): { host: string; banco: string } | null {
+  const v = (bruto ?? "").trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    return { host: u.hostname, banco: u.pathname.replace(/^\//, "") || "(sem nome)" };
+  } catch {
+    return null;
+  }
+}
+
 function descrever(bruto: string | undefined) {
   const valor = bruto ?? "";
   const aparado = valor.trim();
@@ -66,7 +85,10 @@ export async function GET(req: NextRequest) {
     DASHBOARD_PASSWORD: descrever(env.DASHBOARD_PASSWORD),
     SESSION_SECRET: descrever(env.SESSION_SECRET),
     INGEST_API_KEY: descrever(env.INGEST_API_KEY),
-    DATABASE_URL: { configurada: (env.DATABASE_URL ?? "").trim().length > 0 },
+    DATABASE_URL: {
+      configurada: (env.DATABASE_URL ?? "").trim().length > 0,
+      ...(alvoBanco(env.DATABASE_URL) ?? { host: null, banco: null }),
+    },
     // URL não é segredo — mostrar de cara pega erro de digitação e webhook-test
     N8N_REENVIO_URL: (env.N8N_REENVIO_URL ?? "").trim() || null,
     N8N_REENVIO_TOKEN: descrever(env.N8N_REENVIO_TOKEN),

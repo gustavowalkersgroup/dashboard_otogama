@@ -106,27 +106,102 @@ export async function contagemLembretes(dias: Periodo) {
 
 // -------------------------------------------------------------- confirmações
 
+/**
+ * Os desfechos são contados pelo ESTADO ATUAL de cada agendamento, não por
+ * evento. Uma confirmação que pegou a Konsist fora entra como `erro_api`, fica
+ * na fila do n8n e volta como `ok` quando a fila drena — contando evento, ela
+ * apareceria para sempre nas duas colunas. Contando o último resultado de cada
+ * chave, o número se corrige sozinho quando a recuperação acontece.
+ *
+ * `total` e `mensagens` continuam por evento: alimentam "trabalho poupado", que
+ * mede mensagem de WhatsApp tratada, não agendamento.
+ */
 export async function contagemConfirmacoes(dias: Periodo) {
   const r = await recorte(dias);
   const [linha] = await sql()`
-    SELECT
-      COUNT(*) FILTER (WHERE payload->>'resultado' IN ('ok','ja_confirmado')) AS total,
-      COUNT(DISTINCT (telefone, ts))
-        FILTER (WHERE payload->>'resultado' IN ('ok','ja_confirmado')) AS mensagens,
-      COUNT(*) FILTER (WHERE payload->>'resultado' = 'ok') AS ok,
-      COUNT(*) FILTER (WHERE payload->>'resultado' = 'ja_confirmado') AS ja_confirmado,
-      COUNT(*) FILTER (WHERE payload->>'resultado' = 'sem_paciente') AS sem_paciente
-    FROM eventos
-    WHERE tenant_id = ${TENANT} AND tipo = 'confirmacao' AND ts >= ${r.desde}
-      AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave) payload->>'resultado' AS resultado
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'confirmacao'
+        AND chave IS NOT NULL AND ts >= ${r.desde}
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
+      ORDER BY chave, ts DESC
+    ),
+    brutos AS (
+      SELECT
+        COUNT(*) FILTER (WHERE payload->>'resultado' IN ('ok','ja_confirmado')) AS total,
+        COUNT(DISTINCT (telefone, ts))
+          FILTER (WHERE payload->>'resultado' IN ('ok','ja_confirmado')) AS mensagens
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'confirmacao' AND ts >= ${r.desde}
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
+    )
+    SELECT b.total, b.mensagens,
+      (SELECT COUNT(*) FROM ultimos WHERE resultado = 'ok') AS ok,
+      (SELECT COUNT(*) FROM ultimos WHERE resultado = 'ja_confirmado') AS ja_confirmado,
+      (SELECT COUNT(*) FROM ultimos WHERE resultado = 'erro_api') AS erro_api,
+      (SELECT COUNT(*) FROM ultimos WHERE resultado = 'falha_definitiva') AS falha_definitiva,
+      (SELECT COUNT(*) FROM ultimos WHERE resultado = 'sem_paciente') AS sem_paciente
+    FROM brutos b
   `;
   return {
     total: n(linha?.total),
     mensagens: n(linha?.mensagens),
     ok: n(linha?.ok),
     jaConfirmado: n(linha?.ja_confirmado),
+    erroApi: n(linha?.erro_api),
+    falhaDefinitiva: n(linha?.falha_definitiva),
     semPaciente: n(linha?.sem_paciente),
   };
+}
+
+export type PresaApi = {
+  chave: string;
+  paciente: string | null;
+  telefone: string | null;
+  ts: string;
+  /** `erro_api`: na fila, ainda retentando. `falha_definitiva`: a fila desistiu. */
+  resultado: "erro_api" | "falha_definitiva";
+  tentativas: number | null;
+};
+
+/**
+ * Confirmações que o paciente fez e a Konsist não registrou porque estava fora.
+ * O n8n as guarda numa fila e retenta a cada 15min enquanto a API responde.
+ *
+ * Os dois estados pedem reações opostas, por isso vêm juntos e separados na tela:
+ * `erro_api` ainda está sendo retentado e some sozinho quando gravar — olhar é
+ * desperdício. `falha_definitiva` é a fila tendo desistido depois de 5 tentativas:
+ * ninguém mais vai tentar, o paciente acha que confirmou, e alguém precisa gravar
+ * na mão no sistema da clínica.
+ */
+export async function listaPresasApi(dias: Periodo): Promise<PresaApi[]> {
+  const r = await recorte(dias);
+  const linhas = await sql()`
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave)
+        chave, paciente, telefone, ts,
+        payload->>'resultado' AS resultado,
+        payload->>'tentativas' AS tentativas
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'confirmacao'
+        AND chave IS NOT NULL AND ts >= ${r.desde}
+        AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
+      ORDER BY chave, ts DESC
+    )
+    SELECT chave, paciente, telefone, ts, resultado, tentativas FROM ultimos
+    WHERE resultado IN ('erro_api', 'falha_definitiva')
+    ORDER BY ts DESC
+    LIMIT 200
+  `;
+  return linhas.map((l) => ({
+    chave: String(l.chave),
+    paciente: (l.paciente as string) ?? null,
+    telefone: (l.telefone as string) ?? null,
+    ts: new Date(l.ts as string).toISOString(),
+    resultado: String(l.resultado) as "erro_api" | "falha_definitiva",
+    tentativas: l.tentativas == null ? null : n(l.tentativas),
+  }));
 }
 
 /** Taxa por agendamento: chaves avisadas no período × chaves com confirmação posterior. */

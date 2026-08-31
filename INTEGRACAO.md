@@ -46,6 +46,15 @@ x-api-key: <INGEST_API_KEY>
 | `x-api-key` errada/ausente | `401` |
 | Body inválido (`tipo` desconhecido, `ts` não-ISO, JSON quebrado) | `400` com o motivo |
 | Mais de 60 req/min | `429` (proteção contra loop de workflow) |
+| `INGEST_API_KEY`/`SESSION_SECRET` ausente no deployment | `500` com o nome da variável |
+| Falha ao gravar no banco | `500 {"erro":"falha ao gravar evento: <motivo do Postgres>"}` |
+
+O `500` de gravação devolve o motivo cru do Postgres, raspado de credencial e
+cortado em 300 caracteres. Isso existe porque em 30/08/2026 a ingestão passou dias
+devolvendo só "falha ao gravar evento": os workflows registravam `falhas: 118` a
+cada hora, `motivos` dizia apenas isso, e descobrir se a tabela havia sumido ou se
+era falha de conexão exigia ler log da Vercel — que ninguém lê a tempo. O motivo no
+corpo aparece direto no `Resumo` de qualquer workflow e nas execuções do n8n.
 
 ### Padrão obrigatório nos workflows n8n
 
@@ -73,9 +82,33 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
 }'
 ```
 
-### 2. `confirmacao` — webhook de confirmação (3 desfechos)
+### 2. `confirmacao` — webhook de confirmação (4 desfechos)
 
-`payload.resultado`: `"ok"` (gravou na Konsist) | `"ja_confirmado"` | `"sem_paciente"` (falha).
+`payload.resultado`: `"ok"` (gravou na Konsist) | `"ja_confirmado"` | `"erro_api"` (a
+Konsist não respondeu) | `"sem_paciente"` (a chave não tem paciente correspondente).
+
+**`erro_api` é diferente de falha.** Quando a Konsist está fora, o paciente
+confirmou de verdade — o que faltou foi gravar. O n8n guarda essa confirmação
+numa fila (Data Table `Otogama Confirmacoes Pendentes`), o workflow *Monitor API
+Konsist* retenta a cada 15 minutos enquanto a API responde, e desiste depois de
+5 tentativas marcando `falha_definitiva`. O paciente recebe uma mensagem
+dizendo que a confirmação foi recebida e será sincronizada.
+
+Manter os dois separados importa porque eles pedem ações opostas: `sem_paciente`
+é problema de cadastro e alguém precisa olhar a chave; `erro_api` normalmente se
+resolve sozinho e olhar seria desperdício. Até 25/08/2026 os dois chegavam como
+`sem_paciente`, e a tela contava queda de API como paciente não localizado.
+
+Quando a fila desiste, o resultado final é `"falha_definitiva"`: ninguém mais vai
+tentar, o paciente acha que confirmou, e alguém precisa gravar na mão no sistema
+da clínica. É o único desfecho desta tela que exige ação humana obrigatória — o
+`Monitor API Konsist` alerta no Discord quando acontece.
+
+Os desfechos na tela são contados pelo **último resultado de cada chave**, não
+por evento: quando a fila drena, o `Monitor API Konsist` posta o `confirmacao` de
+novo com `payload.origem = "fila_reprocessada"` e o resultado final (`ok`,
+`ja_confirmado` ou `falha_definitiva`), e a chave sai sozinha da coluna de presas.
+O payload desse reprocessamento também traz `tentativas` e `http`.
 
 ```bash
 curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: application/json" -d '{

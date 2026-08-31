@@ -48,6 +48,19 @@ function chaveValida(recebida: string | null, esperada: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Motivo do erro do banco, curto e sem credencial. A mensagem do driver às vezes
+ * traz a URL de conexão, que carrega a senha — daí a raspagem antes de devolver.
+ */
+function motivoDoErro(e: unknown): string {
+  const bruto = e instanceof Error ? e.message : String(e);
+  return bruto
+    .replace(/[a-z]+:\/\/[^\s@]*@/gi, "://***@")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+}
+
 function expandirChaves(chave: unknown): (string | null)[] {
   if (chave === null || chave === undefined) return [null];
   const partes = String(chave)
@@ -138,7 +151,15 @@ export async function POST(req: NextRequest) {
     }
   } catch (e) {
     console.error("ingestão falhou:", e);
-    return NextResponse.json({ erro: "falha ao gravar evento" }, { status: 500 });
+    // Devolve o motivo, não só "falhou". Quem chama aqui já provou a chave, e a
+    // mensagem crua do Postgres é a diferença entre "a tabela sumiu" e "não
+    // consegui conectar" — dois problemas com consertos opostos. Sem isso, em
+    // 30/08 a ingestão passou dias devolvendo 500 e a única forma de saber o
+    // motivo era ler log da Vercel, que ninguém lê a tempo.
+    return NextResponse.json(
+      { erro: `falha ao gravar evento: ${motivoDoErro(e)}` },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ ok: true, inseridos, dup: duplicados > 0 });
