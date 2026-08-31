@@ -141,10 +141,32 @@ Na ordem, pelo n8n:
    Konsist em três janelas de 7 dias. Repovoa a tela de Agenda. A Data Table de
    estado (`LvK4ttoKzGS2uXPq`) só avança quando o POST volta 2xx, então nada foi
    marcado como enviado durante a queda.
-2. `40Sg7PZFdnpxfi0l` — backfill de `envio_lembrete` desde 04/08. **O nó de
-   envio está desabilitado** e tem de continuar assim: é backfill de evento, não
-   reenvio de mensagem para paciente.
-3. `uUNDzdCLAZcTELFx` — backfill de `agendamento_ia`.
+2. `40Sg7PZFdnpxfi0l` — backfill de `envio_lembrete` desde 04/08, a partir das
+   Data Tables de dedup (D-0, D-1, consulta perdida).
+3. `uUNDzdCLAZcTELFx` — backfill de `agendamento_ia`, a partir da Data Table de
+   rastreio.
+
+**Um por vez.** A ingestão tem rate limit de 60 req/min por instância; os dois
+backfills somados (30/35s + 20/30s) passam disso, e o poll também escreve. Rodar
+em paralelo troca gravação por 429.
+
+Duas coisas nesses dois workflows que já custaram tempo:
+
+- **O nó `Enviar ao Dashboard` vinha desabilitado.** Foi desligado depois da
+  primeira rodada, em agosto, para não repetir sem querer. Com ele desligado o
+  workflow roda inteiro, o n8n diz "success", e **não grava nada** — o nó
+  desabilitado passa a entrada adiante e o `Resumo` conta tudo como falha. Se um
+  backfill "rodar" e não aparecer linha, é isso. Não há nó de WhatsApp em
+  nenhum dos dois: o único envio é o POST em `/api/eventos`.
+- **Os dois tinham corte** (21/08 13:37 e 22/08 00:00), para não duplicar com a
+  ingestão ao vivo. O corte foi removido em 31/08, e tinha de ser: o que a
+  ingestão gravou entre o corte e 30/08 morreu com o banco antigo, então manter
+  o corte deixaria justamente esses dez dias de fora. Duplicar não é risco —
+  a tabela nasceu vazia e o índice `eventos_dedup` barra repetição.
+
+O backfill de `agendamento_ia` exigia, antes, apagar as linhas incompletas
+(`paciente IS NULL`) para elas não vencerem o `DISTINCT ON (chave) ORDER BY ts
+DESC`. Numa tabela recriada vazia esse pré-requisito desaparece.
 
 ## 8. O que impede a repetição
 
