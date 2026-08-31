@@ -204,7 +204,40 @@ export async function listaPresasApi(dias: Periodo): Promise<PresaApi[]> {
   }));
 }
 
-/** Taxa por agendamento: chaves avisadas no período × chaves com confirmação posterior. */
+/**
+ * Taxa por agendamento: chaves avisadas no período × chaves confirmadas.
+ *
+ * Conta duas fontes, unidas:
+ *
+ * 1. **evento `confirmacao`** — o paciente respondeu no WhatsApp. É a fonte
+ *    boa: tem timestamp real e atribui a confirmação à automação.
+ * 2. **`status_consulta` com `situacao = 'Confirmado'`** — a Konsist diz que o
+ *    agendamento está confirmado, sem dizer por quem. É a rede de segurança:
+ *    sobrevive à perda do log de eventos, porque o poll relê da Konsist.
+ *
+ * A segunda existe por causa de 30/08: o log de `confirmacao` foi perdido com o
+ * banco antigo e não havia de onde reconstruir — nenhuma Data Table do n8n
+ * guarda confirmação bem-sucedida, só as que falharam.
+ *
+ * Duas sutilezas que parecem bug e não são:
+ *
+ * - A busca em `status_consulta` pergunta se a chave **passou por** 'Confirmado'
+ *   em algum momento, não qual é a situação atual. Quem confirma e depois
+ *   comparece vira 'Realizado', e olhar só o estado atual perderia a
+ *   confirmação. O log é append-only e guarda as duas linhas.
+ * - E não filtra por `ts`, ao contrário da busca em `confirmacao`. O `ts` de
+ *   `status_consulta` é a data da CONSULTA (com os segundos codificando o
+ *   contador de versão), não o momento da observação — comparar com o ts do
+ *   lembrete não significaria nada.
+ *
+ * O denominador é `julgaveis`, não `avisados`: só entram os agendamentos sobre
+ * os quais existe alguma informação — algum `status_consulta` ou algum evento
+ * de `confirmacao`. O poll varre 21 dias (−13 a +7), e o card de 30 ou 90 dias
+ * conta lembretes bem mais antigos que isso; dividir pelo total de avisados
+ * daria uma taxa permanentemente subestimada, que é tão enganosa quanto o zero
+ * que ela substitui. Em 31/08, 310 avisados tinham só 4 com status conhecido.
+ * `avisados` continua exposto, para a tela poder dizer os dois números.
+ */
 export async function taxaConfirmacao(dias: Periodo) {
   const r = await recorte(dias);
   const [linha] = await sql()`
@@ -215,20 +248,50 @@ export async function taxaConfirmacao(dias: Periodo) {
         AND ts >= ${r.desde} AND chave IS NOT NULL
         AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
       GROUP BY chave
+    ),
+    marcados AS (
+      SELECT
+        EXISTS (
+          SELECT 1 FROM eventos c
+          WHERE c.tenant_id = ${TENANT} AND c.tipo = 'confirmacao'
+            AND c.chave = e.chave AND c.ts >= e.primeiro_envio
+            AND c.payload->>'resultado' IN ('ok','ja_confirmado')
+        ) AS por_evento,
+        EXISTS (
+          SELECT 1 FROM eventos s
+          WHERE s.tenant_id = ${TENANT} AND s.tipo = 'status_consulta'
+            AND s.chave = e.chave
+            AND s.payload->>'situacao' = 'Confirmado'
+        ) AS por_situacao,
+        EXISTS (
+          SELECT 1 FROM eventos s
+          WHERE s.tenant_id = ${TENANT} AND s.tipo = 'status_consulta'
+            AND s.chave = e.chave
+        ) AS tem_status
+      FROM envios e
     )
     SELECT
       COUNT(*) AS avisados,
-      COUNT(*) FILTER (WHERE EXISTS (
-        SELECT 1 FROM eventos c
-        WHERE c.tenant_id = ${TENANT} AND c.tipo = 'confirmacao'
-          AND c.chave = e.chave AND c.ts >= e.primeiro_envio
-          AND c.payload->>'resultado' IN ('ok','ja_confirmado')
-      )) AS confirmados
-    FROM envios e
+      COUNT(*) FILTER (WHERE tem_status OR por_evento) AS julgaveis,
+      COUNT(*) FILTER (WHERE por_evento OR por_situacao) AS confirmados,
+      COUNT(*) FILTER (WHERE por_evento) AS por_evento,
+      COUNT(*) FILTER (WHERE por_situacao AND NOT por_evento) AS so_situacao
+    FROM marcados
   `;
   const avisados = n(linha?.avisados);
+  const julgaveis = n(linha?.julgaveis);
   const confirmados = n(linha?.confirmados);
-  return { avisados, confirmados, taxa: avisados > 0 ? confirmados / avisados : null };
+  return {
+    avisados,
+    /** Avisados sobre os quais existe alguma informação — ver o comentário acima. */
+    julgaveis,
+    confirmados,
+    /** Confirmadas com resposta no WhatsApp registrada. */
+    porEvento: n(linha?.por_evento),
+    /** Confirmadas só pela situação na Konsist — sem resposta registrada. */
+    soSituacao: n(linha?.so_situacao),
+    taxa: julgaveis > 0 ? confirmados / julgaveis : null,
+  };
 }
 
 /** Mediana e média de (confirmação − envio mais recente anterior), descartando <0 ou >72h. */
