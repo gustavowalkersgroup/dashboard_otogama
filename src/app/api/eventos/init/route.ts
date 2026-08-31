@@ -38,8 +38,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const db = sql();
   try {
+    // Dentro do try pelo mesmo motivo da rota de ingestão: sem DATABASE_URL,
+    // `sql()` lança antes de qualquer coisa e o 500 sai sem dizer o que falta.
+    const db = sql();
     const existiaAntes = await tabelaExiste();
     const comandos = comandosSchema();
     for (const comando of comandos) {
