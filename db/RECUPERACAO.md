@@ -80,23 +80,35 @@ console do Neon depois de criar:
 
 ## 4. Trocar a `DATABASE_URL` na Vercel
 
-A integração da Vercel injeta `DATABASE_URL` (e `POSTGRES_*`, `PG*`) sozinha ao
-conectar o store. **Cuidado com a variável antiga:** se já existia uma
-`DATABASE_URL` posta à mão — era o caso aqui — a integração não sobrescreve, e o
-deployment continua apontando para o banco velho sem reclamar de nada. Apagar a
-manual e deixar a da integração, ou colar nela a connection string **pooled**
-(`-pooler` no host) do projeto novo.
+A integração da Vercel injeta `DATABASE_URL` (e `POSTGRES_*`, `PG*`) ao conectar
+o store. Se já existia uma `DATABASE_URL` posta à mão, a integração **não**
+sobrescreve, e o deployment continua no banco velho sem reclamar de nada.
 
-Depois, **redeploy**: a Vercel só entrega variável nova para deployment novo.
+**Nunca apague primeiro.** Em 31/08 este runbook dizia "apagar a manual e deixar
+a da integração" e isso derrubou a produção: havia só **uma** `DATABASE_URL`, ela
+já apontava para o banco novo e funcionava; apagada, o projeto ficou sem variável
+de banco nenhuma. A queda só apareceu no deploy seguinte, porque variável só vale
+para deployment novo — o deployment em pé continuou funcionando e escondeu o
+estrago por vinte minutos.
 
-Conferir para onde o deployment está apontando, já logado no dashboard:
+A ordem segura é **editar, não apagar**:
+
+1. Abrir a `DATABASE_URL` que existe e **colar nela** a connection string
+   **pooled** (`-pooler` no host) do projeto novo, em Production, Preview e
+   Development. Se não existir nenhuma, criar.
+2. **Redeploy.**
+3. Conferir, e só então mexer em variável duplicada, se houver.
+
+Conferir para onde o deployment está apontando — de dentro do dashboard já
+logado, ou por fora com a `INGEST_API_KEY` no header `x-api-key`:
 
 ```
 GET /api/login/diagnostico
 ```
 
-O campo `DATABASE_URL` devolve `host` e `banco` (nunca usuário nem senha). O
-`host` tem de ser o do projeto novo, e `banco` tem de ser `otogama`.
+O campo `DATABASE_URL` devolve `configurada`, `host` e `banco` (nunca usuário nem
+senha), e `commit` diz qual deployment respondeu. `configurada: false` é
+exatamente o estado de 31/08 13:30: nenhuma variável de banco no projeto.
 
 ## 5. Criar a tabela
 
