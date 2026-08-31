@@ -20,6 +20,31 @@ import {
   rotuloPeriodo,
 } from "@/lib/metricas";
 
+/**
+ * Diz sobre quantos agendamentos a taxa fala, e de onde veio a confirmação.
+ *
+ * Mostra "1 de 4 com status" e não "1 de 310 avisados" porque o denominador é
+ * só o que dá para julgar: o poll varre 21 dias, e o card de 30 ou 90 conta
+ * lembretes mais antigos que isso. O total de avisados vem junto, para não
+ * sumir da tela.
+ *
+ * E separa "só pela Konsist": uma confirmação vista apenas na situação do
+ * agendamento não prova que o paciente respondeu à nossa mensagem — pode ter
+ * ligado para a clínica. Somar sem separar infla a métrica da automação.
+ */
+function detalheConfirmacao(t: {
+  confirmados: number;
+  avisados: number;
+  julgaveis: number;
+  soSituacao: number;
+}) {
+  if (t.julgaveis === 0) {
+    return `sem status conhecido dos ${numeroBR(t.avisados)} avisados`;
+  }
+  const base = `${numeroBR(t.confirmados)} de ${numeroBR(t.julgaveis)} com status · ${numeroBR(t.avisados)} avisados`;
+  return t.soSituacao > 0 ? `${base} · ${numeroBR(t.soSituacao)} só pela Konsist` : base;
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function VisaoGeral({
@@ -96,7 +121,7 @@ export default async function VisaoGeral({
         <CardMetrica
           rotulo="Taxa de confirmação"
           valor={taxa.taxa === null ? "—" : `${Math.round(taxa.taxa * 100)}%`}
-          detalhe={`${numeroBR(taxa.confirmados)} de ${numeroBR(taxa.avisados)} avisados`}
+          detalhe={detalheConfirmacao(taxa)}
         />
         <CardMetrica
           rotulo="Tempo até confirmar"

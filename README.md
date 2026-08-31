@@ -191,7 +191,7 @@ O filtro tem duas escalas, que respondem a perguntas diferentes:
 | Consultas marcadas pela IA | eventos `agendamento_ia`; status atual vem do último `desfecho_agendamento` da mesma chave |
 | Lembretes enviados | mensagens = `COUNT(DISTINCT (telefone, ts))`; agendamentos avisados = `COUNT(*)` |
 | Confirmações | `confirmacao` com resultado `ok` ou `ja_confirmado` |
-| Taxa de confirmação | chaves avisadas no período que têm confirmação posterior ÷ chaves avisadas |
+| Taxa de confirmação | chaves confirmadas ÷ chaves avisadas **com informação**. Confirmada = tem evento `confirmacao` (respondeu no WhatsApp) **ou** passou por `situacao = 'Confirmado'` na Konsist. Com informação = tem algum `status_consulta` ou algum `confirmacao` — o poll varre 21 dias, e dividir pelo total de avisados num card de 30 ou 90 dias subestimaria a taxa de forma permanente |
 | Tempo até confirmar | mediana (e média) de `confirmação − envio anterior mais recente`, descartando deltas negativos ou > 72h |
 | Trabalho poupado | lembrete enviado = 3 min · confirmação processada = 2 min · agendamento da IA = 8 min (editáveis via env); exibido em horas e em dias úteis de 8h |
 | Saúde da API | pares fora→ok de `api_status`; uptime % recortado ao período |
