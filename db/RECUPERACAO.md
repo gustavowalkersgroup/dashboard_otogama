@@ -72,11 +72,11 @@ console do Neon depois de criar:
 
 - **History retention** — subir para o máximo que o plano permitir (24 h no
   Free). É o que decide se um acidente é reversível.
-- **Região vs. região das functions da Vercel.** O default da Vercel é `iad1`
-  (us-east-1), e aí `us-east-1` é a escolha certa — era o store antigo, em
-  `sa-east-1`, que estava do lado errado. Se as functions deste projeto
-  estiverem em `gru1`, vale recriar o store em `aws-sa-east-1`: cada query
-  atravessa o continente.
+- **Região.** Está certa. As functions deste projeto rodam em `iad1`
+  (us-east-1) — dá para conferir no header `x-vercel-id` de qualquer resposta,
+  que em 31/08 vinha `gru1::iad1::…`: `gru1` é só o edge que atendeu, `iad1` é
+  onde a function executou. Era o store antigo, em `sa-east-1`, que estava do
+  lado errado do continente.
 
 ## 4. Trocar a `DATABASE_URL` na Vercel
 
@@ -148,8 +148,14 @@ Na ordem, pelo n8n:
 
 ## 8. O que impede a repetição
 
-- Health check honesto (passo 6) — e o Monitor do n8n olhando para ele, com
-  alerta no Discord na transição.
+- Health check honesto (passo 6), e o workflow **`Otogama - Monitor Event
+  Store`** (`TM7xi7RgUSn5vzQM`) olhando para ele de 15 em 15 minutos. Alerta no
+  Discord só na **transição** (fora/voltou), com estado na Data Table
+  `IadNxjPHdvrCaRnL`, linha `id_monitor = event_store` — a mesma tabela do
+  monitor da Konsist, linha separada, para não mexer numa máquina de estado que
+  já funciona. O alerta traduz o campo `store` no conserto, em vez de mandar
+  quem lê abrir a rota. Discord e não WhatsApp de propósito: isto é problema de
+  quem mantém o sistema, não da recepção da clínica.
 - `POST /api/eventos/init`: recriar a tabela não depende mais de alguém ter a
   connection string e um cliente Postgres à mão.
 - A ingestão devolve o motivo do Postgres no corpo do 500, em vez de "falhou".
