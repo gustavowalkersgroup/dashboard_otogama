@@ -46,6 +46,15 @@ x-api-key: <INGEST_API_KEY>
 | `x-api-key` errada/ausente | `401` |
 | Body inválido (`tipo` desconhecido, `ts` não-ISO, JSON quebrado) | `400` com o motivo |
 | Mais de 60 req/min | `429` (proteção contra loop de workflow) |
+| `INGEST_API_KEY`/`SESSION_SECRET` ausente no deployment | `500` com o nome da variável |
+| Falha ao gravar no banco | `500 {"erro":"falha ao gravar evento: <motivo do Postgres>"}` |
+
+O `500` de gravação devolve o motivo cru do Postgres, raspado de credencial e
+cortado em 300 caracteres. Isso existe porque em 30/08/2026 a ingestão passou dias
+devolvendo só "falha ao gravar evento": os workflows registravam `falhas: 118` a
+cada hora, `motivos` dizia apenas isso, e descobrir se a tabela havia sumido ou se
+era falha de conexão exigia ler log da Vercel — que ninguém lê a tempo. O motivo no
+corpo aparece direto no `Resumo` de qualquer workflow e nas execuções do n8n.
 
 ### Padrão obrigatório nos workflows n8n
 
