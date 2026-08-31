@@ -19,10 +19,12 @@ Duas coisas transformaram um acidente em cinco dias de silêncio:
   `200 {"ok":true}` sem tocar no banco: media se o processo respirava, não se
   havia onde gravar. Corrigido — hoje ele checa a tabela e responde **503** com
   `store` e `motivo`.
-- **`history_retention_seconds` era 21600** (6 h), então o restore
-  point-in-time do Neon já não alcançava o momento do DROP quando o problema foi
-  notado. As outras duas branches do projeto eram previews da Vercel criadas em
-  30/08, depois do dano.
+- **O restore point-in-time não alcançava o DROP.** O
+  `history_retention_seconds` era 21600 (6 h) — e 21600 **é o teto do plano
+  Free**, não um descuido de configuração (§3). Num acidente notado depois de
+  seis horas, o PITR do Neon simplesmente não é uma rede de segurança aqui. As
+  outras duas branches do projeto eram previews da Vercel criadas em 30/08,
+  depois do dano.
 
 **O log de eventos anterior a 30/08 está perdido.** Reconstruível a partir das
 fontes: `status_consulta` (o poll relê 21 dias da Konsist), `envio_lembrete` e
@@ -50,6 +52,10 @@ novo se cria **pela Vercel**, em *Storage → Create Database → Neon*, e a
 integração injeta as variáveis no projeto sozinha. Pela API do Neon dá para
 criar database e role dentro de um projeto que já existe, mas não projeto.
 
+A base da API é `https://console.neon.tech/api/v2` — **não** existe host
+`api.neon.tech`; tentar por lá dá `ENOTFOUND`, que se confunde com bloqueio de
+rede. Auth por `Authorization: Bearer napi_…`.
+
 ## 3. Criar o projeto
 
 Painel da **Vercel** → *Storage* → **Create Database** → Neon → conectar ao
@@ -67,11 +73,17 @@ Feito em 31/08/2026 — é este o banco do dashboard hoje:
 | database | `neondb` |
 | role | `neondb_owner` |
 
-Nada mais divide este projeto com o dashboard. Duas coisas para conferir no
-console do Neon depois de criar:
+Nada mais divide este projeto com o dashboard. Duas coisas que ficaram
+conferidas em 31/08 e não precisam ser refeitas:
 
-- **History retention** — subir para o máximo que o plano permitir (24 h no
-  Free). É o que decide se um acidente é reversível.
+- **History retention — não há o que subir.** O projeto está em 21600 s (6 h),
+  que é o máximo do plano. Verificado em 31/08 contra a API do Neon
+  (`PATCH /api/v2/projects/<id>` com 86400): resposta `400`, *"requested history
+  retention seconds exceeds allowed maximum; max: 21600"*, com o projeto em
+  `subscription_type: free_v3`. Só sobe trocando de plano no Neon. Enquanto for
+  Free, **o PITR não é a rede de segurança** — quem cobre esse papel é o monitor
+  do §8 (detecta em até 15 min) somado aos backfills do §7, que reconstroem
+  tudo menos `confirmacao` e `api_status`.
 - **Região.** Está certa. As functions deste projeto rodam em `iad1`
   (us-east-1) — dá para conferir no header `x-vercel-id` de qualquer resposta,
   que em 31/08 vinha `gru1::iad1::…`: `gru1` é só o edge que atendeu, `iad1` é
