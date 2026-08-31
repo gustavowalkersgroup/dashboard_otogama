@@ -107,10 +107,15 @@ export async function POST(req: NextRequest) {
 
   const chaves = expandirChaves(corpo.chave);
 
-  const db = sql();
   let inseridos = 0;
   let duplicados = 0;
   try {
+    // `sql()` dentro do try, e não antes: sem DATABASE_URL ele lança de
+    // imediato, e fora do try isso vira um 500 genérico do Next — sem o nosso
+    // corpo `{erro}`. Foi assim que 1245 gravações do backfill de 31/08
+    // chegaram ao n8n como "desconhecido" em vez de "DATABASE_URL não
+    // configurada", que era a única informação que importava.
+    const db = sql();
     for (const chave of chaves) {
       const linhas = await db`
         INSERT INTO eventos (tenant_id, tipo, chave, telefone, paciente, payload, ts)
