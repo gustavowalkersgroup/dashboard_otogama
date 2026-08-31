@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
+import { chaveConfere, chaveIngestEsperada } from "@/lib/chave";
 import { COOKIE_SESSAO, validarTokenSessao } from "@/lib/sessao";
 
 export const runtime = "nodejs";
@@ -15,17 +16,8 @@ export const dynamic = "force-dynamic";
 // existe porque quem CONSEGUE entrar não deveria precisar decorar segredo nenhum
 // para conferir a configuração — basta abrir a URL no navegador já logado.
 
-function chaveConfere(recebida: string | null): boolean {
-  const env: Record<string, string | undefined> = process.env;
-  const esperada = (env.INGEST_API_KEY ?? "").trim();
-  if (!esperada || !recebida) return false;
-  const a = createHash("sha256").update(recebida.trim()).digest();
-  const b = createHash("sha256").update(esperada).digest();
-  return timingSafeEqual(a, b);
-}
-
 async function autorizado(req: NextRequest): Promise<boolean> {
-  if (chaveConfere(req.headers.get("x-api-key"))) return true;
+  if (chaveConfere(req.headers.get("x-api-key"), chaveIngestEsperada())) return true;
   return validarTokenSessao(req.cookies.get(COOKIE_SESSAO)?.value);
 }
 

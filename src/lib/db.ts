@@ -20,3 +20,16 @@ export function sql(): NeonQueryFunction<false, false> {
   }
   return cliente;
 }
+
+/**
+ * Motivo do erro do banco, curto e sem credencial. A mensagem do driver às vezes
+ * traz a URL de conexão, que carrega a senha — daí a raspagem antes de devolver.
+ */
+export function motivoDoErro(e: unknown): string {
+  const bruto = e instanceof Error ? e.message : String(e);
+  return bruto
+    .replace(/[a-z]+:\/\/[^\s@]*@/gi, "://***@")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+}

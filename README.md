@@ -125,8 +125,11 @@ Abra http://localhost:3000 — entre com a `DASHBOARD_PASSWORD`.
 
 1. Importe este repositório na Vercel (framework: Next.js, sem config extra).
 2. Configure as 4 variáveis de ambiente em *Settings → Environment Variables*.
-3. Deploy. Teste: `GET https://<app>.vercel.app/api/eventos/health` deve responder
-   `200 {"ok":true}`.
+3. Deploy. Crie a tabela com
+   `curl -X POST https://<app>.vercel.app/api/eventos/init -H "x-api-key: $INGEST_API_KEY"`
+   e teste: `GET https://<app>.vercel.app/api/eventos/health` deve responder
+   `200 {"ok":true,"store":"ok"}`. Qualquer 503 aí traz em `store` qual é o
+   conserto — o runbook está em `db/RECUPERACAO.md`.
 4. Atualize a URL de produção nos exemplos do `INTEGRACAO.md` e aponte as fontes.
 
 ### 5. Apontar as fontes

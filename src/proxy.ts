@@ -10,6 +10,7 @@ const PUBLICAS = [
   "/api/login/diagnostico",
   "/api/eventos",
   "/api/eventos/health",
+  "/api/eventos/init",
 ];
 
 export default async function proxy(req: NextRequest) {

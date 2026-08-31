@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash, timingSafeEqual } from "node:crypto";
-import { sql, TENANT } from "@/lib/db";
+import { chaveConfere, chaveIngestEsperada } from "@/lib/chave";
+import { motivoDoErro, sql, TENANT } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,33 +34,6 @@ function estourouRateLimit(): boolean {
   return contagemJanela > LIMITE_POR_MINUTO;
 }
 
-// Espaço/quebra de linha no fim do valor é acidente de copiar-e-colar no painel
-// da Vercel, não chave — sem o trim vira um 401 impossível de diagnosticar.
-function chaveEsperada(): string {
-  const env: Record<string, string | undefined> = process.env;
-  return (env.INGEST_API_KEY ?? "").trim();
-}
-
-function chaveValida(recebida: string | null, esperada: string): boolean {
-  if (!recebida) return false;
-  const a = createHash("sha256").update(recebida.trim()).digest();
-  const b = createHash("sha256").update(esperada).digest();
-  return timingSafeEqual(a, b);
-}
-
-/**
- * Motivo do erro do banco, curto e sem credencial. A mensagem do driver às vezes
- * traz a URL de conexão, que carrega a senha — daí a raspagem antes de devolver.
- */
-function motivoDoErro(e: unknown): string {
-  const bruto = e instanceof Error ? e.message : String(e);
-  return bruto
-    .replace(/[a-z]+:\/\/[^\s@]*@/gi, "://***@")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 300);
-}
-
 function expandirChaves(chave: unknown): (string | null)[] {
   if (chave === null || chave === undefined) return [null];
   const partes = String(chave)
@@ -74,7 +47,7 @@ function expandirChaves(chave: unknown): (string | null)[] {
 export async function POST(req: NextRequest) {
   // Configuração ausente não pode responder 401: 401 diz "sua chave está errada"
   // e manda quem integra caçar o problema no n8n, quando ele está no deployment.
-  const esperada = chaveEsperada();
+  const esperada = chaveIngestEsperada();
   if (!esperada) {
     console.error("INGEST_API_KEY ausente ou vazia no ambiente deste deployment.");
     return NextResponse.json(
@@ -82,7 +55,7 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
-  if (!chaveValida(req.headers.get("x-api-key"), esperada)) {
+  if (!chaveConfere(req.headers.get("x-api-key"), esperada)) {
     return NextResponse.json({ erro: "api key inválida ou ausente" }, { status: 401 });
   }
   if (estourouRateLimit()) {

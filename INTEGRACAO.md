@@ -12,8 +12,26 @@ x-api-key: <INGEST_API_KEY>
 ```
 
 - **BASE_URL produção:** `https://SEU-APP.vercel.app` *(atualizar após o deploy)*
-- **Health check (sem auth):** `GET {BASE_URL}/api/eventos/health` → `200 {"ok":true}`
-  — use no monitor do n8n para vigiar o próprio dashboard.
+- **Health check (sem auth):** `GET {BASE_URL}/api/eventos/health` — use no
+  monitor do n8n para vigiar o próprio dashboard. Ele checa o **event store**,
+  não só se o processo respira:
+
+  | resposta | `store` | o que fazer |
+  | --- | --- | --- |
+  | `200 {"ok":true,"store":"ok"}` | `ok` | nada |
+  | `503` | `sem_database_url` | variável ausente ou vazia no deployment |
+  | `503` | `tabela_ausente` | `POST /api/eventos/init` |
+  | `503` | `sem_conexao` | Neon fora ou credencial recusada — `motivo` traz o erro |
+
+  O 503 é de propósito: o nó HTTP do n8n falha e o alerta sai sozinho. Um health
+  check que responde 200 com o banco quebrado é pior que nenhum — foi ele que
+  deixou a ingestão morta de 25 a 30/08 sem ninguém perceber.
+
+- **Criar o event store (auth por `x-api-key` ou sessão):**
+  `POST {BASE_URL}/api/eventos/init` → `{"ok":true,"comandos":4,"tabela":"criada"}`.
+  Aplica o DDL do repositório; é todo `IF NOT EXISTS`, então não apaga nada e
+  chamar duas vezes é o mesmo que chamar uma. Use depois de trocar a
+  `DATABASE_URL` — veja `db/RECUPERACAO.md`.
 
 ## Corpo do evento
 
@@ -389,8 +407,11 @@ mandariam duas vezes. A confirmação na tela existe para isso.
 ## Testes de sanidade
 
 ```bash
-# health (sem auth) → 200
+# health (sem auth) → 200 e store:"ok"; 503 se o event store estiver fora
 curl -sS "$BASE/api/eventos/health"
+
+# criar/garantir a tabela `eventos` (idempotente) → {"ok":true,...}
+curl -sS -X POST "$BASE/api/eventos/init" -H "x-api-key: $KEY"
 
 # key errada → 401
 curl -sS -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/eventos" \
