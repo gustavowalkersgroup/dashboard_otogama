@@ -198,6 +198,7 @@ O filtro tem duas escalas, que respondem a perguntas diferentes:
 | Taxa de falta (tela Agenda) | desfecho mais recente por chave em `status_consulta`; `Faltou ÷ (Faltou + Realizado)` — `Cancelado` nunca entra no denominador |
 | Comparecimento com × sem lembrete (Visão geral) | mesmo desfecho, separado por existência de `envio_lembrete` para a chave; funil Agendado → Confirmado → Compareceu |
 | Desfecho por médico (tela Agenda) | desfecho mais recente por chave, agrupado por `payload.medico`, top 12 por volume |
+| Tipo de atendimento (tela Consultas) | encaixe se o minuto foge da grade de 10; senão o tipo que o `envio_lembrete` anunciou ao paciente; senão `payload.codigo_procedimento` (prefixo 40/41/51 ou `PAC` = exame); senão "Sem tipo". **Encaixe tem precedência sobre exame**, igual ao disparo de lembretes — é o rótulo que o paciente recebeu. Cobre 85–91% das consultas hoje |
 | Comparecimento IA × manual (tela Agendamentos IA) | mesmo desfecho, separado por existência de `agendamento_ia` para a chave |
 
 ## Scripts

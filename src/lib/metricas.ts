@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { classificaAtendimento, type TipoAtendimento } from "@/lib/atendimento";
 import { sql, TENANT } from "@/lib/db";
 import {
   type DiaRelativo,
@@ -1045,4 +1046,129 @@ export async function painelLembretes(dia: DiaLembrete): Promise<PainelLembretes
   }
 
   return { dia, dataBR, avisadas, faltando, canceladas, encerradas, agendaVistaEm };
+}
+
+// ------------------------------------------------------- agenda do dia (tela)
+
+export type ConsultaDetalhada = ConsultaDoDia & {
+  codigoProcedimento: string | null;
+  tipo: TipoAtendimento;
+  avisada: boolean;
+  confirmada: boolean;
+};
+
+export type AgendaDoDia = {
+  dia: DiaRelativo;
+  /** DD/MM/YYYY */
+  dataBR: string;
+  consultas: ConsultaDetalhada[];
+  /** observação mais recente do poll para este dia; null = o poll nunca viu */
+  agendaVistaEm: string | null;
+  /** consultas cujo tipo não deu para determinar por nenhuma das fontes */
+  semTipo: number;
+};
+
+/**
+ * A agenda de um dia com profissional, tipo e situação de cada consulta.
+ *
+ * **Esta lista não é a agenda da Konsist, é o que o event store viu.** O poll
+ * grava `status_consulta` só quando a situação MUDA (veja `Montar Mudancas` no
+ * workflow do poll) e o estado anterior mora numa Data Table do n8n que
+ * sobreviveu à recriação da tabela `eventos` em 31/08 — então consulta marcada
+ * antes disso e estável desde então nunca foi re-emitida e não aparece aqui.
+ * Medido em 03/09: a Konsist tinha 16 consultas de Fonoaudiologia naquele dia e
+ * o store conhecia 6; para 04/09, 15 contra 14. A diferença encolhe sozinha
+ * conforme as situações mudam, e zera de vez se a Data Table de estado for
+ * limpa (o poll re-emite tudo na varredura seguinte).
+ *
+ * Por isso a tela mostra `agendaVistaEm` e o total conhecido em vez de
+ * apresentar a lista como completa: foi exatamente uma leitura de "a lista está
+ * completa" que fez parecer que a Fonoaudiologia não tinha recebido lembrete.
+ *
+ * `confirmada` olha o HISTÓRICO, não a situação atual: quem confirmou e depois
+ * foi atendido está em `Realizado`, e comparar só o estado atual perderia a
+ * confirmação. Mesma razão e mesma forma de `taxaConfirmacao`.
+ */
+export async function agendaDoDia(dia: DiaRelativo): Promise<AgendaDoDia> {
+  const dataBR = dataBRDiaRelativo(dia);
+  const linhas = await sql()`
+    WITH ultimos AS (
+      SELECT DISTINCT ON (chave)
+        chave, paciente, telefone,
+        payload->>'situacao' AS situacao,
+        payload->>'medico' AS medico,
+        payload->>'especialidade' AS especialidade,
+        payload->>'servico' AS servico,
+        payload->>'hora_consulta' AS hora_consulta,
+        payload->>'codigo_procedimento' AS codigo_procedimento,
+        payload->>'visto_em' AS visto_em
+      FROM eventos
+      WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
+        AND chave IS NOT NULL AND payload->>'data_consulta' = ${dataBR}
+      ORDER BY chave, ts DESC
+    )
+    SELECT u.*,
+      EXISTS (
+        SELECT 1 FROM eventos l
+        WHERE l.tenant_id = ${TENANT} AND l.tipo = 'envio_lembrete' AND l.chave = u.chave
+      ) AS avisada,
+      (
+        SELECT l.payload->>'tipo_consulta' FROM eventos l
+        WHERE l.tenant_id = ${TENANT} AND l.tipo = 'envio_lembrete' AND l.chave = u.chave
+        ORDER BY l.ts DESC LIMIT 1
+      ) AS tipo_anunciado,
+      (
+        EXISTS (
+          SELECT 1 FROM eventos c
+          WHERE c.tenant_id = ${TENANT} AND c.tipo = 'confirmacao' AND c.chave = u.chave
+            AND c.payload->>'resultado' IN ('ok', 'ja_confirmado')
+        )
+        OR EXISTS (
+          SELECT 1 FROM eventos s
+          WHERE s.tenant_id = ${TENANT} AND s.tipo = 'status_consulta' AND s.chave = u.chave
+            AND s.payload->>'situacao' = 'Confirmado'
+        )
+      ) AS confirmada
+    FROM ultimos u
+    ORDER BY u.hora_consulta NULLS LAST, u.paciente NULLS LAST
+  `;
+
+  let agendaVistaEm: string | null = null;
+  let semTipo = 0;
+  const consultas: ConsultaDetalhada[] = [];
+
+  for (const l of linhas) {
+    const vistoEm = (l.visto_em as string) ?? null;
+    if (vistoEm && (agendaVistaEm === null || vistoEm > agendaVistaEm)) agendaVistaEm = vistoEm;
+
+    const horaConsulta = (l.hora_consulta as string) ?? null;
+    const codigoProcedimento = (l.codigo_procedimento as string) ?? null;
+
+    consultas.push({
+      chave: String(l.chave),
+      paciente: (l.paciente as string) ?? null,
+      telefone: (l.telefone as string) ?? null,
+      medico: (l.medico as string) ?? null,
+      especialidade: (l.especialidade as string) ?? null,
+      servico: (l.servico as string) ?? null,
+      situacao: String(l.situacao ?? ""),
+      horaConsulta,
+      vistoEm,
+      codigoProcedimento,
+      tipo: classificaAtendimento({
+        horaConsulta,
+        codigoProcedimento,
+        tipoAnunciado: (l.tipo_anunciado as string) ?? null,
+      }),
+      avisada: Boolean(l.avisada),
+      confirmada: Boolean(l.confirmada),
+    });
+  }
+
+  // Conta o que ficou REALMENTE sem tipo, não o que está sem código: o tipo
+  // anunciado pelo lembrete cobre a maioria das consultas antigas, e contar por
+  // código faria a tela avisar de um problema que ela já resolveu.
+  semTipo = consultas.filter((c) => c.tipo === "desconhecido").length;
+
+  return { dia, dataBR, consultas, agendaVistaEm, semTipo };
 }
