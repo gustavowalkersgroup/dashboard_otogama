@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch origin *)",
+      "Bash(npm run lint)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx --no-install tsc --noEmit)",
+      "mcp__n8n__get_workflow_execution",
+      "mcp__n8n__search_workflow_executions",
+      "mcp__n8n__get_workflow_details",
+      "mcp__n8n__search_workflows",
+      "mcp__n8n__search_data_tables",
+      "mcp__n8n__get_node_types",
+      "mcp__n8n__get_workflow_sdk_reference",
+      "mcp__n8n__validate_workflow",
+      "mcp__github__pull_request_read",
+      "mcp__Vercel__list_projects",
+      "mcp__Vercel__get_project",
+      "mcp__Vercel__web_fetch_vercel_url",
+      "mcp__Claude_Code_Remote__list_triggers"
+    ]
+  }
+}
