@@ -260,9 +260,22 @@ curl -sS -X POST "$BASE/api/eventos" -H "x-api-key: $KEY" -H "Content-Type: appl
   "chave": "575382",
   "ts": "2026-08-18T09:05:00-03:00",
   "payload": { "situacao": "Realizado", "medico": "Dr. X", "especialidade": "Otorrino",
-               "servico": "Consulta Otorrino", "data_consulta": "18/08/2026", "hora_consulta": "09:00" }
+               "servico": "Consulta Otorrino", "data_consulta": "18/08/2026", "hora_consulta": "09:00",
+               "codigo_procedimento": "40103439" }
 }'
 ```
+
+**`payload.codigo_procedimento`** (desde 03/09/2026) é o
+`agendamento_codigo_procedimento` cru da Konsist, e existe por um motivo só:
+separar **exame** de **consulta**. A Konsist não tem esse campo — a distinção
+nasceu no disparo de lembretes, porque consulta, exame e encaixe usam templates
+diferentes na NexTags, e a regra é `prefixo 40/41/51 ou código PAC = exame`,
+`minuto fora da grade de 10 = encaixe`, com **encaixe tendo precedência**.
+
+Guardado cru, e não já classificado, para que a regra viva no dashboard
+(`src/lib/atendimento.ts`) e possa mudar sem exigir backfill. Eventos anteriores
+a 03/09/2026 não têm o campo; para esses o dashboard cai no tipo que o
+`envio_lembrete` anunciou ao paciente, que é o rótulo que ele de fato recebeu.
 
 Como `ts` fica na data da consulta e as janelas incluem 7 dias à frente,
 consultas futuras entram nos recortes de 7/30/90 dias como **pendentes** — é

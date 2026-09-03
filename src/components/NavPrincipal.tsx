@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
-// `periodo: false` para a tela que não se recorta por período: Lembretes fala de
-// um dia de agenda (?d=), então carregar o ?p= para lá só sujaria a URL.
+// `periodo: false` para as telas que não se recortam por período: Lembretes e
+// Consultas falam de um dia de agenda (?d=), então carregar o ?p= para lá só
+// sujaria a URL.
 const ITENS = [
   { href: "/", rotulo: "Visão geral", periodo: true },
   { href: "/confirmacoes", rotulo: "Confirmações", periodo: true },
   { href: "/agendamentos", rotulo: "Agendamentos IA", periodo: true },
   { href: "/agenda", rotulo: "Agenda", periodo: true },
+  { href: "/consultas", rotulo: "Consultas", periodo: false },
   { href: "/lembretes", rotulo: "Lembretes", periodo: false },
   { href: "/saude", rotulo: "Saúde da API", periodo: true },
 ];
