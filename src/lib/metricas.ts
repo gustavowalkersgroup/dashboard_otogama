@@ -722,7 +722,7 @@ export async function taxaNoShow(dias: Periodo): Promise<TaxaNoShow> {
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
         AND chave IS NOT NULL AND ts >= ${r.desde}
         AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
-      ORDER BY chave, ts DESC
+      ORDER BY chave, id DESC
     )
     SELECT
       COUNT(*) FILTER (WHERE situacao = 'Realizado') AS realizado,
@@ -798,7 +798,7 @@ export async function funilComparecimento(dias: Periodo): Promise<EstagioFunil[]
         AND chave IS NOT NULL AND ts >= ${r.desde}
         AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
         AND payload->>'situacao' IN ('Realizado', 'Faltou')
-      ORDER BY chave, ts DESC
+      ORDER BY chave, id DESC
     ),
     marcado AS (
       SELECT
@@ -853,7 +853,7 @@ export async function desfechoPorMedico(dias: Periodo): Promise<DesfechoMedico[]
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
         AND chave IS NOT NULL AND ts >= ${r.desde}
         AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
-      ORDER BY chave, ts DESC
+      ORDER BY chave, id DESC
     )
     SELECT
       COALESCE(medico, 'Não informado') AS medico,
@@ -896,7 +896,7 @@ export async function comparecimentoIaVsHumano(dias: Periodo): Promise<Compareci
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
         AND chave IS NOT NULL AND ts >= ${r.desde}
         AND (${r.todos}::bool OR chave = ANY(${r.chaves}::text[]))
-      ORDER BY chave, ts DESC
+      ORDER BY chave, id DESC
     ),
     marcado AS (
       SELECT
@@ -978,6 +978,8 @@ export type PainelLembretes = {
   canceladas: number;
   /** já encerradas (Realizado/Faltou) — lembrete não faz mais sentido */
   encerradas: number;
+  /** sumiram da agenda da Konsist — não existem mais para receber lembrete */
+  removidas: number;
   /** observação mais recente que o poll gravou para este dia; null = poll nunca viu */
   agendaVistaEm: string | null;
 };
@@ -985,19 +987,33 @@ export type PainelLembretes = {
 export async function painelLembretes(dia: DiaLembrete): Promise<PainelLembretes> {
   const dataBR = dataBRDiaRelativo(dia);
   const linhas = await sql()`
-    WITH ultimos AS (
-      SELECT DISTINCT ON (chave)
-        chave, paciente, telefone,
-        payload->>'situacao' AS situacao,
-        payload->>'medico' AS medico,
-        payload->>'especialidade' AS especialidade,
-        payload->>'servico' AS servico,
-        payload->>'hora_consulta' AS hora_consulta,
-        payload->>'visto_em' AS visto_em
-      FROM eventos
+    -- O recorte por dia vem DEPOIS de resolver o estado de cada chave, nunca
+    -- antes. Filtrar por data_consulta dentro do DISTINCT ON faria a consulta
+    -- remarcada continuar casando pelo evento velho: em 14/09/2026 a chave
+    -- 577652 aparecia aqui como consulta de hoje enquanto na Konsist ja estava
+    -- em 21/09, e o reenvio nunca achava nada para mandar. "candidatas" limita a
+    -- varredura as chaves que algum dia falaram deste dia; "ultimos" resolve o
+    -- estado atual delas olhando TODOS os seus eventos; o WHERE final mantem so
+    -- as que continuam neste dia.
+    WITH candidatas AS (
+      SELECT DISTINCT chave FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
         AND chave IS NOT NULL AND payload->>'data_consulta' = ${dataBR}
-      ORDER BY chave, ts DESC
+    ),
+    ultimos AS (
+      SELECT DISTINCT ON (e.chave)
+        e.chave, e.paciente, e.telefone,
+        e.payload->>'situacao' AS situacao,
+        e.payload->>'medico' AS medico,
+        e.payload->>'especialidade' AS especialidade,
+        e.payload->>'servico' AS servico,
+        e.payload->>'hora_consulta' AS hora_consulta,
+        e.payload->>'data_consulta' AS data_consulta,
+        e.payload->>'visto_em' AS visto_em
+      FROM eventos e
+      JOIN candidatas c ON c.chave = e.chave
+      WHERE e.tenant_id = ${TENANT} AND e.tipo = 'status_consulta'
+      ORDER BY e.chave, e.id DESC
     )
     SELECT u.*,
       EXISTS (
@@ -1005,6 +1021,7 @@ export async function painelLembretes(dia: DiaLembrete): Promise<PainelLembretes
         WHERE l.tenant_id = ${TENANT} AND l.tipo = 'envio_lembrete' AND l.chave = u.chave
       ) AS avisada
     FROM ultimos u
+    WHERE u.data_consulta = ${dataBR}
     ORDER BY u.hora_consulta NULLS LAST, u.paciente NULLS LAST
   `;
 
@@ -1012,6 +1029,7 @@ export async function painelLembretes(dia: DiaLembrete): Promise<PainelLembretes
   let avisadas = 0;
   let canceladas = 0;
   let encerradas = 0;
+  let removidas = 0;
   let agendaVistaEm: string | null = null;
   const faltando: ConsultaDoDia[] = [];
 
@@ -1020,6 +1038,14 @@ export async function painelLembretes(dia: DiaLembrete): Promise<PainelLembretes
     const vistoEm = (l.visto_em as string) ?? null;
     if (vistoEm && (agendaVistaEm === null || vistoEm > agendaVistaEm)) agendaVistaEm = vistoEm;
 
+    // Sumiu da agenda da Konsist: o poll deduziu a ausência, não leu um
+    // cancelamento. Conta à parte para não engordar "encerradas" com consulta
+    // que não existe mais — e nunca entra em `faltando`, que é o que a tela
+    // oferece para reenvio.
+    if (situacao === "Removido") {
+      removidas += 1;
+      continue;
+    }
     if (situacao === "Cancelado") {
       canceladas += 1;
       continue;
@@ -1045,7 +1071,7 @@ export async function painelLembretes(dia: DiaLembrete): Promise<PainelLembretes
     });
   }
 
-  return { dia, dataBR, avisadas, faltando, canceladas, encerradas, agendaVistaEm };
+  return { dia, dataBR, avisadas, faltando, canceladas, encerradas, removidas, agendaVistaEm };
 }
 
 // ------------------------------------------------------- agenda do dia (tela)
@@ -1092,20 +1118,34 @@ export type AgendaDoDia = {
 export async function agendaDoDia(dia: DiaRelativo): Promise<AgendaDoDia> {
   const dataBR = dataBRDiaRelativo(dia);
   const linhas = await sql()`
-    WITH ultimos AS (
-      SELECT DISTINCT ON (chave)
-        chave, paciente, telefone,
-        payload->>'situacao' AS situacao,
-        payload->>'medico' AS medico,
-        payload->>'especialidade' AS especialidade,
-        payload->>'servico' AS servico,
-        payload->>'hora_consulta' AS hora_consulta,
-        payload->>'codigo_procedimento' AS codigo_procedimento,
-        payload->>'visto_em' AS visto_em
-      FROM eventos
+    -- O recorte por dia vem DEPOIS de resolver o estado de cada chave, nunca
+    -- antes. Filtrar por data_consulta dentro do DISTINCT ON faria a consulta
+    -- remarcada continuar casando pelo evento velho: em 14/09/2026 a chave
+    -- 577652 aparecia aqui como consulta de hoje enquanto na Konsist ja estava
+    -- em 21/09, e o reenvio nunca achava nada para mandar. "candidatas" limita a
+    -- varredura as chaves que algum dia falaram deste dia; "ultimos" resolve o
+    -- estado atual delas olhando TODOS os seus eventos; o WHERE final mantem so
+    -- as que continuam neste dia.
+    WITH candidatas AS (
+      SELECT DISTINCT chave FROM eventos
       WHERE tenant_id = ${TENANT} AND tipo = 'status_consulta'
         AND chave IS NOT NULL AND payload->>'data_consulta' = ${dataBR}
-      ORDER BY chave, ts DESC
+    ),
+    ultimos AS (
+      SELECT DISTINCT ON (e.chave)
+        e.chave, e.paciente, e.telefone,
+        e.payload->>'situacao' AS situacao,
+        e.payload->>'medico' AS medico,
+        e.payload->>'especialidade' AS especialidade,
+        e.payload->>'servico' AS servico,
+        e.payload->>'hora_consulta' AS hora_consulta,
+        e.payload->>'codigo_procedimento' AS codigo_procedimento,
+        e.payload->>'data_consulta' AS data_consulta,
+        e.payload->>'visto_em' AS visto_em
+      FROM eventos e
+      JOIN candidatas c ON c.chave = e.chave
+      WHERE e.tenant_id = ${TENANT} AND e.tipo = 'status_consulta'
+      ORDER BY e.chave, e.id DESC
     )
     SELECT u.*,
       EXISTS (
@@ -1130,6 +1170,7 @@ export async function agendaDoDia(dia: DiaRelativo): Promise<AgendaDoDia> {
         )
       ) AS confirmada
     FROM ultimos u
+    WHERE u.data_consulta = ${dataBR}
     ORDER BY u.hora_consulta NULLS LAST, u.paciente NULLS LAST
   `;
 
