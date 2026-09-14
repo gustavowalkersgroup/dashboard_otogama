@@ -13,6 +13,7 @@ const TOM_SITUACAO: Record<string, "bom" | "alerta" | "critico" | "neutro"> = {
   Agendado: "neutro",
   Faltou: "critico",
   Cancelado: "alerta",
+  Removido: "alerta",
 };
 
 // Encaixe antes de exame, igual ao classificador e ao lembrete: é o rótulo que o
